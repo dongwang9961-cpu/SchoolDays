@@ -74,7 +74,7 @@ Bright Kids Academy
 ## Parent Workflow
 
 1. Parent opens a tenant-specific website, tenant-specific registration link, or public class link.
-2. System resolves the tenant from the domain, subdomain, slug, or share token.
+2. System resolves the tenant from the domain, subdomain, slug, or share token. In local development, this can be simulated with a URL such as `http://localhost:5173/school/longlong-art-studio`.
 3. Parent chooses an authentication method.
    - Email link registration.
    - Google login, if enabled for the tenant.
@@ -365,7 +365,7 @@ Delivery rules:
 - Public class catalog pages must only show classes from the resolved tenant.
 - Parent portals should only show sites, programs, classes, children, enrollments, and attendance for the current tenant.
 - A child belongs to a parent and a tenant.
-- A school can have multiple sites.
+- A school can have one or more sites, subject to the tenant's configured site limit.
 - A site can have multiple programs.
 - A program can have multiple classes.
 - A class can have one or more teachers.
@@ -438,100 +438,137 @@ unique(enrollment_id, class_date)
 
 ## Example API Endpoints
 
+All backend API endpoints use the `/api` prefix. Frontend routes, such as public class pages or invitation landing pages, do not need this prefix.
+
+The frontend is split into separate HTML entry points:
+
+```text
+/                  -> root platform page, served by index.html
+/school/{slug}     -> school website page, served by school.html
+```
+
+The root page is for platform users and school administrator invitation acceptance. The school page is tenant-scoped and is used for parent registration, parent registration completion, teacher invitation acceptance, and later public class browsing.
+
+In local development, `/school/longlong-art-studio` simulates the future `longlong-art-studio.schooldays.example.com` subdomain. The frontend resolves the school by calling `GET /api/public/schools/longlong-art-studio`, then uses the returned tenant id for parent registration and Google login.
+
+Domain endpoints whose service logic is not complete should still be exposed by the backend and return `501 Not Implemented` with a stable JSON body. This allows the frontend and future integrations to rely on the route contract while each module is implemented.
+
 ### Authentication
 
 ```http
-POST /auth/request-parent-registration-link
-POST /auth/request-self-service-registration-link
-POST /auth/complete-registration
-GET /auth/google/start
-GET /auth/google/callback
-POST /auth/login
-POST /auth/logout
-POST /auth/accept-tenant-invitation
-POST /auth/accept-teacher-invitation
+POST /api/auth/request-parent-registration-link
+POST /api/auth/request-self-service-registration-link
+POST /api/auth/complete-registration
+GET /api/auth/google/start
+GET /api/auth/google/callback
+POST /api/auth/login
+POST /api/auth/logout
+POST /api/auth/accept-tenant-invitation
+POST /api/auth/accept-teacher-invitation
+```
+
+### Public School Lookup
+
+```http
+GET /api/public/schools/:slug
 ```
 
 ### Platform Tenant Invitations
 
 ```http
-POST /platform/tenant-invitations
-GET /platform/tenant-invitations
-POST /tenant-invitations/:token/accept
+POST /api/platform/tenant-invitations
+GET /api/platform/tenant-invitations
+POST /api/tenant-invitations/:token/accept
 ```
 
 ### Tenant and School Setup
 
 ```http
-GET /tenants/:tenantId/sites
-POST /tenants/:tenantId/sites
-PATCH /tenants/:tenantId/sites/:siteId
+GET /api/tenants/:tenantId/sites
+POST /api/tenants/:tenantId/sites
+PATCH /api/tenants/:tenantId/sites/:siteId
 
-POST /tenants/:tenantId/programs
-PATCH /tenants/:tenantId/programs/:programId
+POST /api/tenants/:tenantId/programs
+PATCH /api/tenants/:tenantId/programs/:programId
 
-POST /tenants/:tenantId/classes
-PATCH /tenants/:tenantId/classes/:classId
-POST /tenants/:tenantId/classes/:classId/schedules
+POST /api/tenants/:tenantId/classes
+PATCH /api/tenants/:tenantId/classes/:classId
+POST /api/tenants/:tenantId/classes/:classId/schedules
 ```
+
+`GET /api/tenants/:tenantId/sites` returns both the site list and the current tenant site quota:
+
+```json
+{
+  "sites": [],
+  "quota": {
+    "unlimitedSites": false,
+    "maxSites": 5,
+    "currentSiteCount": 0,
+    "remainingSites": 5
+  }
+}
+```
+
+`POST /api/tenants/:tenantId/sites` must reject creation when the tenant has reached its site limit.
 
 ### Teacher Management
 
 ```http
-POST /tenants/:tenantId/classes/:classId/teachers/invite
-GET /tenants/:tenantId/teacher-invitations
-POST /tenants/:tenantId/classes/:classId/teachers
-DELETE /tenants/:tenantId/classes/:classId/teachers/:teacherUserId
+POST /api/tenants/:tenantId/classes/:classId/teachers/invite
+GET /api/tenants/:tenantId/teacher-invitations
+POST /api/tenants/:tenantId/classes/:classId/teachers
+DELETE /api/tenants/:tenantId/classes/:classId/teachers/:teacherUserId
 ```
 
 ### Parent and Child Management
 
 ```http
-GET /parents/me/children
-POST /parents/me/children
-PATCH /parents/me/children/:childId
+GET /api/parents/me/children
+POST /api/parents/me/children
+PATCH /api/parents/me/children/:childId
 ```
 
 ### Enrollment
 
 ```http
-GET /parents/me/enrollments
-POST /enrollments
-GET /classes/:classId/available-dates
+GET /api/parents/me/enrollments
+POST /api/enrollments
+GET /api/classes/:classId/available-dates
 ```
 
 ### Payments
 
 ```http
-GET /classes/:classId/pricing
-POST /enrollments/:enrollmentId/stripe-checkout-sessions
-POST /webhooks/stripe
-POST /enrollments/:enrollmentId/offline-payments
-POST /enrollments/:enrollmentId/payment-receipts
-POST /tenants/:tenantId/payment-receipts/:receiptId/approve
-POST /tenants/:tenantId/payment-receipts/:receiptId/reject
-GET /parents/me/payments
-GET /tenants/:tenantId/payments
-POST /tenants/:tenantId/payments/:paymentId/refund
+GET /api/classes/:classId/pricing
+POST /api/enrollments/:enrollmentId/stripe-checkout-sessions
+POST /api/webhooks/stripe
+POST /api/enrollments/:enrollmentId/offline-payments
+POST /api/enrollments/:enrollmentId/payment-receipts
+POST /api/tenants/:tenantId/payment-receipts/:receiptId/approve
+POST /api/tenants/:tenantId/payment-receipts/:receiptId/reject
+GET /api/parents/me/payments
+GET /api/tenants/:tenantId/payments
+POST /api/tenants/:tenantId/payments/:paymentId/refund
 ```
 
 ### Attendance
 
 ```http
-POST /attendance/check-in
-GET /classes/:classId/attendance?date=2026-07-01
-GET /parents/me/children/:childId/attendance
+POST /api/attendance/check-in
+GET /api/classes/:classId/attendance?date=2026-07-01
+GET /api/parents/me/children/:childId/attendance
 ```
 
 ### Notifications
 
 ```http
-GET /tenants/:tenantId/notification-providers
-POST /tenants/:tenantId/notification-providers
-PATCH /tenants/:tenantId/notification-providers/:providerId
+GET /api/tenants/:tenantId/notification-providers
+POST /api/tenants/:tenantId/notification-providers
+PATCH /api/tenants/:tenantId/notification-providers/:providerId
 
-POST /tenants/:tenantId/notifications
-GET /tenants/:tenantId/notification-history
+POST /api/tenants/:tenantId/notifications
+GET /api/tenants/:tenantId/notification-history
 ```
 
 ## Recommended Architecture
@@ -608,7 +645,10 @@ Example tenant entry patterns:
 https://brightkids.example.com
 https://app.example.com/bright-kids
 https://app.example.com/t/bright-kids/classes/beginner-robotics
+http://localhost:5173/school/bright-kids
 ```
+
+Production should use school-specific subdomains when available. During development, `/school/{slug}` is the canonical simulation of that subdomain.
 
 Parent-facing pages should not include a school selector. If a parent needs access to more than one tenant, they should enter each tenant through that tenant's own website or invitation link.
 
@@ -830,7 +870,7 @@ Recommended public link rules:
 - The link must resolve to Bright Kids Academy before registration starts.
 - The link should resolve to exactly one target class, including its site and program context.
 - The target class should be displayed automatically; parents should not need to manually select site, program, or class again.
-- Use a public slug or share token instead of exposing raw database IDs.
+- Use a public or share token instead of exposing raw database IDs.
 - Only show active classes that are configured as public.
 - Validate class capacity and available dates server-side.
 - Require parent registration before completing child enrollment.
@@ -1234,7 +1274,8 @@ Example `metadata` values:
   "settings": {
     "defaultTimezone": "America/Detroit",
     "allowParentCheckIn": true,
-    "allowTeacherCheckIn": true
+    "allowTeacherCheckIn": true,
+    "max_sites": 5
   },
   "branding": {
     "logoUrl": "https://example.com/logo.png",
@@ -1242,6 +1283,14 @@ Example `metadata` values:
   }
 }
 ```
+
+Tenant site limits are plan/settings data and can live in `metadata.settings.max_sites`:
+
+- `1` means the school can create one site.
+- `5` means the school can create up to five sites.
+- `"unlimited"` means VIP schools can create as many sites as needed.
+
+If the setting is missing or invalid, the backend should default to `1` site.
 
 ### TenantInvitation
 
