@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: schooldays
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/schooldays}
+    username: ${SPRING_DATASOURCE_USERNAME:}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jooq:
+    sql-dialect: postgres
+
+schooldays:
+  public-base-url: ${SCHOOLDAYS_PUBLIC_BASE_URL:http://localhost:8080}
+  security:
+    jwt:
+      issuer: ${SCHOOLDAYS_JWT_ISSUER:schooldays}
+      current-key-id: ${SCHOOLDAYS_JWT_CURRENT_KEY_ID:primary}
+      keys:
+        primary: ${SCHOOLDAYS_JWT_SECRET}
+      access-token-ttl-minutes: ${SCHOOLDAYS_JWT_ACCESS_TOKEN_TTL_MINUTES:60}
+    google:
+      client-id: ${SCHOOLDAYS_GOOGLE_CLIENT_ID:}
+      client-secret: ${SCHOOLDAYS_GOOGLE_CLIENT_SECRET:}
+      redirect-uri: ${SCHOOLDAYS_GOOGLE_REDIRECT_URI:http://localhost:8080/api/auth/google/callback}
+      token-uri: ${SCHOOLDAYS_GOOGLE_TOKEN_URI:https://oauth2.googleapis.com/token}
+      user-info-uri: ${SCHOOLDAYS_GOOGLE_USER_INFO_URI:https://openidconnect.googleapis.com/v1/userinfo}
+  seed-test-data:
+    enabled: ${SCHOOLDAYS_SEED_TEST_DATA:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+server:
+  port: ${PORT:8080}
