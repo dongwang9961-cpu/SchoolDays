@@ -39,6 +39,16 @@ await fetch("/api/auth/login", {
 
 Start the backend from `../backend` before using proxied API calls.
 
+## Production API
+
+For local development, leave `VITE_API_BASE_URL` unset so Vite can proxy relative `/api` calls to `http://localhost:8080`.
+
+For a production frontend build that talks to the production API server, set:
+
+```bash
+VITE_API_BASE_URL=https://api.schooldays.cc
+```
+
 ## Google Places Autocomplete
 
 The school admin site form can use Google Places Autocomplete for address entry. Create a frontend environment file with a Google Maps JavaScript API key that has the Places library enabled:

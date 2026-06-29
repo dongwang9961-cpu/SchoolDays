@@ -6,8 +6,10 @@ export class ApiError extends Error {
   }
 }
 
+const apiBaseUrl = resolveApiBaseUrl();
+
 export async function apiGet(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     headers: jsonHeaders(options),
   });
 
@@ -23,15 +25,11 @@ export async function apiGet(path, options = {}) {
     return null;
   }
 
-  if (response.status === 204) {
-    return null;
-  }
-
   return response.json();
 }
 
 export async function apiPost(path, body, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     method: "POST",
     headers: jsonHeaders(options),
     body: JSON.stringify(body),
@@ -53,7 +51,7 @@ export async function apiPost(path, body, options = {}) {
 }
 
 export async function apiPatch(path, body, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     method: "PATCH",
     headers: jsonHeaders(options),
     body: JSON.stringify(body),
@@ -68,6 +66,21 @@ export async function apiPatch(path, body, options = {}) {
   }
 
   return response.json();
+}
+
+function apiUrl(path) {
+  return `${apiBaseUrl}${path}`;
+}
+
+function resolveApiBaseUrl() {
+  const configured = String(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+  if (configured) {
+    return configured;
+  }
+  if (window.location.hostname === "www.schooldays.cc" || window.location.hostname === "schooldays.cc") {
+    return "https://api.schooldays.cc";
+  }
+  return "";
 }
 
 function jsonHeaders(options = {}) {
