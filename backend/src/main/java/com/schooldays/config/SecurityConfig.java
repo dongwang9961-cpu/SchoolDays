@@ -52,6 +52,7 @@ public class SecurityConfig {
                                 "/api/auth/register/complete",
                                 "/api/auth/google/start",
                                 "/api/auth/google/callback",
+                                "/api/oauth/google/gmail/callback",
                                 "/api/auth/login",
                                 "/api/auth/logout",
                                 "/api/auth/accept-tenant-invitation",

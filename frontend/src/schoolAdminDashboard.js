@@ -4,6 +4,12 @@ import { createClass, listClasses, updateClass } from "./api/classes.js";
 import { getTenantClassPricing, saveClassPricing } from "./api/pricing.js";
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
 import { createSite, listSites, updateSite } from "./api/sites.js";
+import {
+  listNotificationHistory,
+  listNotificationProviders,
+  sendNotification,
+  startGmailConnection,
+} from "./api/notifications.js";
 
 let googlePlacesPromise;
 
@@ -80,7 +86,7 @@ const schoolAdminSiteSections = [
     label: "Notifications",
     title: "Notifications",
     summary: "Configure email providers and send class or student notifications.",
-    actions: ["Configure provider", "Send notification", "View history"],
+    actions: ["Free send"],
     rows: ["No notification history loaded yet."],
   },
 ];
@@ -123,7 +129,7 @@ const teacherSections = [
     label: "Notifications",
     title: "Notifications",
     summary: "Send class-related email notifications where school policy allows it.",
-    actions: ["Send class notification", "View history"],
+    actions: ["Free send"],
     rows: ["No notification history loaded yet."],
   },
 ];
@@ -228,6 +234,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let selectedClassPricing = null;
   let loadingClasses = false;
   let loadingClassPricing = false;
+  let notificationProviders = [];
+  let notificationHistory = [];
+  let loadingNotifications = false;
   let profileOpen = false;
   let profile = null;
   let loadingProfile = false;
@@ -236,6 +245,14 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   if (role === "SCHOOL_ADMIN") {
     loadSites();
   }
+
+  window.addEventListener("message", (event) => {
+    if (event.data?.type === "schooldays:gmail-connected") {
+      notice = "Gmail connected.";
+      error = "";
+      loadNotifications();
+    }
+  });
 
   render();
 
@@ -305,7 +322,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             </div>
 
             ${error ? `<p class="message error" role="alert">${escapeHtml(error)}</p>` : ""}
-            ${activeOperation ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedClassPricing, user, sites, programs, loadingClassPricing) : ""}
+            ${activeOperation ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
 
             ${dataList(activeSection, rows)}
           </section>
@@ -325,6 +342,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
           selectedSiteId = "";
         }
         render();
+        if (activeSectionId === "notifications") {
+          loadNotifications();
+        }
       });
     });
 
@@ -439,6 +459,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         if (isPricingOperation(activeOperation)) {
           loadSelectedClassPricing();
         }
+        if (isNotificationOperation(activeOperation)) {
+          loadNotifications();
+        }
       });
     });
 
@@ -469,7 +492,13 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       }
     });
     initializeClassTypeControls(root);
+    initializeNotificationAudienceControls(root);
+    initializeEmlTemplateUpload(root);
+    initializeNotificationWizard(root);
     initializeDirtyForms(root);
+    root.querySelector("[data-send-test-notification]")?.addEventListener("click", async (event) => {
+      await handleTestNotification(event.currentTarget);
+    });
 
     root.querySelectorAll("[data-site-id]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -560,6 +589,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     });
 
     initializeGooglePlacesAutocomplete(root);
+    root.querySelector("[data-gmail-connect]")?.addEventListener("click", connectGmail);
   }
 
   function scheduleNoticeDismissal() {
@@ -870,6 +900,23 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         return;
       }
 
+      if (isNotificationOperation(action)) {
+        const formData = new FormData(form);
+        if (!window.confirm("Send this email to every BCC recipient?")) {
+          submitButton.disabled = false;
+          submitButton.textContent = "Send";
+          return;
+        }
+        const sent = await sendNotification(school.tenantId, notificationPayload(formData));
+        notificationHistory = [sent, ...notificationHistory];
+        notice = "Email notification sent.";
+        error = "";
+        activeOperation = "";
+        render();
+        await loadNotifications();
+        return;
+      }
+
       notice = `${action} is ready for backend integration at ${endpointFor(activeSection, action)}.`;
       error = "";
       activeOperation = "";
@@ -899,6 +946,15 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         return ["Loading classes..."];
       }
       return classRows || ["No classes have been created for this site yet."];
+    }
+    if (section.id === "notifications") {
+      if (loadingNotifications) {
+        return ["Loading notification history..."];
+      }
+      if (!notificationHistory.length) {
+        return ["No notification history loaded yet."];
+      }
+      return notificationHistory.map((entry) => `${entry.subject || "Email"} - ${entry.status} - ${entry.bccRecipientCount} BCC recipients`);
     }
     return section.rows;
   }
@@ -1027,9 +1083,44 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         </div>
       `;
     }
+    if (section.id === "notifications") {
+      return notificationList(rows);
+    }
     return `
       <div class="data-list">
         ${rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")}
+      </div>
+    `;
+  }
+
+  function notificationList(rows) {
+    const gmail = notificationProviders.find((provider) => provider.providerType === "gmail_oauth");
+    return `
+      <div class="provider-strip">
+        <div>
+          <strong>${gmail ? "Gmail connected" : "Gmail not connected"}</strong>
+          <span>${escapeHtml(gmail?.fromEmail || "Connect Gmail before sending email notifications.")}</span>
+        </div>
+        <button class="secondary-button compact-button" data-gmail-connect type="button">
+          ${gmail ? "Reconnect Gmail" : "Connect Gmail"}
+        </button>
+      </div>
+      <div class="data-list notification-history-list">
+        ${
+          notificationHistory.length
+            ? notificationHistory
+                .map(
+                  (entry) => `
+                    <div class="data-row notification-history-row">
+                      <strong>${escapeHtml(entry.subject || "Email notification")}</strong>
+                      <span>${escapeHtml(`${entry.status} - ${entry.bccRecipientCount} BCC recipients`)}</span>
+                      <span>${escapeHtml(entry.sentAt ? new Date(entry.sentAt).toLocaleString() : "")}</span>
+                    </div>
+                  `
+                )
+                .join("")
+            : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
+        }
       </div>
     `;
   }
@@ -1179,6 +1270,74 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     } finally {
       loadingClassPricing = false;
       render();
+    }
+  }
+
+  async function loadNotifications() {
+    if (loadingNotifications || !school?.tenantId) {
+      return;
+    }
+    loadingNotifications = true;
+    try {
+      const [providersResponse, historyResponse] = await Promise.all([
+        listNotificationProviders(school.tenantId),
+        listNotificationHistory(school.tenantId),
+      ]);
+      notificationProviders = providersResponse.providers || [];
+      notificationHistory = historyResponse.history || [];
+      error = "";
+    } catch (loadError) {
+      error = loadError instanceof Error ? loadError.message : "Notifications could not be loaded.";
+    } finally {
+      loadingNotifications = false;
+      render();
+    }
+  }
+
+  async function connectGmail() {
+    try {
+      const response = await startGmailConnection(school.tenantId);
+      const popup = window.open(response.authorizationUrl, "schooldays-gmail-oauth", "width=560,height=720");
+      if (!popup) {
+        window.location.href = response.authorizationUrl;
+        return;
+      }
+      notice = "Complete Gmail permission in the popup.";
+      error = "";
+      render();
+    } catch (connectError) {
+      notice = "";
+      error = connectError instanceof Error ? connectError.message : "Gmail connection could not be started.";
+      render();
+    }
+  }
+
+  async function handleTestNotification(button) {
+    const form = button.closest("form");
+    if (!form) {
+      return;
+    }
+    const formData = new FormData(form);
+    const testEmail = formText(formData, "testBccEmail");
+    if (!testEmail) {
+      showTransientToast("Enter a test BCC email before sending a test.", "error");
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Sending test";
+    try {
+      const payload = notificationPayload(formData);
+      payload.bccEmails = splitEmails(testEmail);
+      delete payload.classId;
+      const sent = await sendNotification(school.tenantId, payload);
+      notificationHistory = [sent, ...notificationHistory];
+      showTransientToast("Test email sent.");
+    } catch (testError) {
+      showTransientToast(testError instanceof Error ? testError.message : "Test email could not be sent.", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Send test";
     }
   }
 
@@ -1395,6 +1554,20 @@ function noticeToast(notice) {
   `;
 }
 
+function showTransientToast(message, type = "success") {
+  const existingToast = document.querySelector("[data-transient-toast]");
+  existingToast?.remove();
+
+  const toast = document.createElement("div");
+  toast.dataset.transientToast = "true";
+  toast.className = `toast ${type === "error" ? "error-toast" : "success-toast"}`;
+  toast.setAttribute("role", type === "error" ? "alert" : "status");
+  toast.setAttribute("aria-live", "polite");
+  toast.textContent = message;
+  document.body.append(toast);
+  window.setTimeout(() => toast.remove(), 3400);
+}
+
 function initializeDirtyForms(root) {
   root.querySelectorAll("[data-dirty-form]").forEach((form) => {
     form.dataset.initialFormState = serializeForm(form);
@@ -1410,6 +1583,12 @@ function updateDirtyForm(form) {
   }
   const submitButton = form.querySelector('button[type="submit"]');
   if (!submitButton) {
+    return;
+  }
+  const notificationStep = Number(form.querySelector("[data-notification-step-value]")?.value || 0);
+  if (notificationStep && notificationStep < 4) {
+    submitButton.disabled = true;
+    submitButton.title = "Complete all notification steps before sending";
     return;
   }
   const isDirty = serializeForm(form) !== form.dataset.initialFormState;
@@ -1483,11 +1662,13 @@ function operationPanel(
   user,
   sites = [],
   programs = [],
+  classes = [],
   loadingPricing = false
 ) {
   const fields = fieldsFor(action, selectedSite, selectedProgram, selectedClass, selectedPricing, user, sites, programs);
   const siteOperation = isSiteOperation(action);
   const pricingOperation = isPricingOperation(action);
+  const notificationOperation = isNotificationOperation(action);
   return `
     <form class="operation-panel" data-dirty-form data-operation-form>
       <div class="workspace-heading">
@@ -1499,7 +1680,9 @@ function operationPanel(
       ${
         pricingOperation
           ? pricingRowsPanel(selectedPricing)
-          : `<div class="operation-grid">
+          : notificationOperation
+            ? notificationComposePanel(classes)
+            : `<div class="operation-grid">
               ${fields
                 .map(
                   (field) => fieldFor(field)
@@ -1511,7 +1694,7 @@ function operationPanel(
       ${siteOperation ? sitePlaceHiddenFields(selectedSite) : ""}
 
       <div class="operation-actions">
-        <button type="submit">${siteOperation ? "Save site" : "Save"}</button>
+        <button type="submit">${notificationOperation ? "Send" : siteOperation ? "Save site" : "Save"}</button>
         <button class="secondary-button" data-operation-cancel type="button">Cancel</button>
       </div>
     </form>
@@ -1519,6 +1702,9 @@ function operationPanel(
 }
 
 function operationTitle(action) {
+  if (isNotificationOperation(action)) {
+    return "Free send";
+  }
   if (isPricingOperation(action)) {
     return "Class pricing";
   }
@@ -1546,6 +1732,9 @@ function operationDescription(section, action) {
   }
   if (isEditClassOperation(action)) {
     return "Update the selected class.";
+  }
+  if (isNotificationOperation(action)) {
+    return "Upload an .eml template, review recipients, send a test email, then confirm the final BCC send.";
   }
   return `Complete this ${section.title.toLowerCase()} action.`;
 }
@@ -1599,6 +1788,66 @@ function isEditClassOperation(action) {
 
 function isPricingOperation(action) {
   return action.toLowerCase().includes("pricing");
+}
+
+function isNotificationOperation(action) {
+  const normalized = action.toLowerCase();
+  return normalized.includes("notification") || normalized.includes("message") || normalized === "free send";
+}
+
+function notificationComposePanel(classes = []) {
+  return `
+    <input data-notification-step-value name="notificationStep" type="hidden" value="1" />
+    <input name="audience" type="hidden" value="manual" />
+    <div class="wizard-steps" aria-label="Notification sending steps">
+      ${["Template", "CC", "Test", "Recipients"].map((label, index) => `
+        <span class="${index === 0 ? "is-active" : ""}" data-wizard-indicator="${index + 1}">${index + 1}. ${escapeHtml(label)}</span>
+      `).join("")}
+    </div>
+    <div class="notification-wizard">
+      <section data-wizard-step="1">
+        <label>
+          <span>.eml template <span class="required-marker" aria-label="required">*</span></span>
+          <input accept=".eml,message/rfc822" data-eml-template name="emlTemplate" required type="file" />
+        </label>
+        <label>
+          <span>Subject <span class="required-marker" aria-label="required">*</span></span>
+          <input name="subject" placeholder="Subject from template" required type="text" />
+        </label>
+        <input name="body" type="hidden" value="Email body is provided by the uploaded .eml template." />
+        <textarea name="templateEml" hidden></textarea>
+      </section>
+
+      <section data-wizard-step="2" hidden>
+        <label>
+          <span>CC address list</span>
+          <textarea name="ccEmails" placeholder="admin@example.com, teacher@example.com"></textarea>
+        </label>
+      </section>
+
+      <section data-wizard-step="3" hidden>
+        <label>
+          <span>Test BCC email</span>
+          <input name="testBccEmail" placeholder="your-test@example.com" type="email" />
+        </label>
+        <button class="secondary-button compact-button" data-send-test-notification type="button">Send test</button>
+      </section>
+
+      <section data-wizard-step="4" hidden>
+        <label>
+          <span>BCC address list <span class="required-marker" aria-label="required">*</span></span>
+          <textarea name="bccEmails" required placeholder="one@example.com, two@example.com"></textarea>
+        </label>
+        <div class="send-confirmation-note">
+          Review the template, CC list, and BCC recipients before sending. A confirmation box will appear after you click Send.
+        </div>
+      </section>
+      <div class="wizard-actions">
+        <button class="secondary-button compact-button" data-wizard-back disabled type="button">Back</button>
+        <button class="secondary-button compact-button" data-wizard-next type="button">Next</button>
+      </div>
+    </div>
+  `;
 }
 
 function pricingRowsPanel(selectedPricing) {
@@ -2205,6 +2454,155 @@ function pricingPayload(formData) {
   };
 }
 
+function notificationPayload(formData) {
+  const audience = formText(formData, "audience", "manual");
+  const payload = {
+    ccEmails: splitEmails(formText(formData, "ccEmails")),
+    bccEmails: splitEmails(formText(formData, "bccEmails")),
+    subject: formText(formData, "subject"),
+    body: formText(formData, "body"),
+    bodyMimeType: "text/plain",
+    templateEml: String(formData.get("templateEml") || ""),
+  };
+  if (audience.startsWith("class:")) {
+    payload.classId = audience.slice("class:".length);
+    payload.bccEmails = [];
+  }
+  return payload;
+}
+
+function splitEmails(value) {
+  return String(value || "")
+    .split(/[\s,;]+/)
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
+
+function parseEmlTemplate(raw) {
+  const normalized = String(raw || "").replace(/\r\n/g, "\n");
+  const separatorIndex = normalized.search(/\n\n/);
+  const headerText = separatorIndex >= 0 ? normalized.slice(0, separatorIndex) : normalized;
+  const headers = parseEmlHeaders(headerText);
+
+  return {
+    subject: decodeMimeHeader(headers.get("subject") || ""),
+    ccEmails: splitEmails(decodeMimeHeader(headers.get("cc") || "")),
+  };
+}
+
+function parseEmlHeaders(headerText) {
+  const unfolded = [];
+  String(headerText || "").split("\n").forEach((line) => {
+    if (/^[\t ]/.test(line) && unfolded.length) {
+      unfolded[unfolded.length - 1] += ` ${line.trim()}`;
+    } else {
+      unfolded.push(line);
+    }
+  });
+  return unfolded.reduce((headers, line) => {
+    const index = line.indexOf(":");
+    if (index > 0) {
+      headers.set(line.slice(0, index).trim().toLowerCase(), line.slice(index + 1).trim());
+    }
+    return headers;
+  }, new Map());
+}
+
+function decodeMimeHeader(value) {
+  return String(value || "")
+    .replace(/=\?utf-8\?b\?([^?]+)\?=/gi, (_, encoded) => {
+      try {
+        return decodeBase64Utf8(encoded);
+      } catch {
+        return "";
+      }
+    })
+    .replace(/=\?utf-8\?q\?([^?]+)\?=/gi, (_, encoded) => decodeQuotedPrintable(encoded.replace(/_/g, " ")));
+}
+
+function extractEmlBody(bodyText, contentType, transferEncoding) {
+  const boundary = boundaryFromContentType(contentType) || inferBoundary(bodyText);
+  if (boundary) {
+    const parts = splitMimeParts(bodyText, boundary);
+    const plainPart = parts.find((part) => part.contentType.includes("text/plain"));
+    const htmlPart = parts.find((part) => part.contentType.includes("text/html"));
+    const selectedPart = plainPart || htmlPart || parts[0];
+    if (selectedPart) {
+      const decoded = decodeEmlBody(selectedPart.body, selectedPart.transferEncoding || transferEncoding);
+      return selectedPart.contentType.includes("text/html") ? stripHtml(decoded) : decoded;
+    }
+  }
+  return decodeEmlBody(bodyText, transferEncoding);
+}
+
+function decodeEmlBody(bodyText, transferEncoding) {
+  if (transferEncoding.includes("base64")) {
+    try {
+      return decodeBase64Utf8(String(bodyText).replace(/\s/g, ""));
+    } catch {
+      return bodyText;
+    }
+  }
+  if (transferEncoding.includes("quoted-printable")) {
+    return decodeQuotedPrintable(bodyText);
+  }
+  return bodyText;
+}
+
+function decodeQuotedPrintable(value) {
+  const text = String(value || "")
+    .replace(/=\n/g, "")
+    .replace(/\r/g, "");
+  const bytes = [];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "=" && /^[A-Fa-f0-9]{2}$/.test(text.slice(index + 1, index + 3))) {
+      bytes.push(parseInt(text.slice(index + 1, index + 3), 16));
+      index += 2;
+    } else {
+      bytes.push(text.charCodeAt(index));
+    }
+  }
+  return new TextDecoder("utf-8").decode(new Uint8Array(bytes));
+}
+
+function boundaryFromContentType(contentType) {
+  return contentType.match(/boundary="?([^";\n]+)"?/i)?.[1] || "";
+}
+
+function inferBoundary(bodyText) {
+  return String(bodyText || "").match(/(?:^|\n)--([^\s-][^\n]*)/)?.[1]?.trim() || "";
+}
+
+function splitMimeParts(bodyText, boundary) {
+  return String(bodyText || "")
+    .split(`--${boundary}`)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "--" && !part.startsWith("--"))
+    .map((part) => {
+      const separatorIndex = part.search(/\n\n/);
+      const headerText = separatorIndex >= 0 ? part.slice(0, separatorIndex) : "";
+      const body = separatorIndex >= 0 ? part.slice(separatorIndex + 2) : part;
+      const headers = parseEmlHeaders(headerText);
+      return {
+        contentType: (headers.get("content-type") || "").toLowerCase(),
+        transferEncoding: (headers.get("content-transfer-encoding") || "").toLowerCase(),
+        body,
+      };
+    });
+}
+
+function decodeBase64Utf8(value) {
+  const binary = atob(value);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+function stripHtml(value) {
+  const container = document.createElement("div");
+  container.innerHTML = value;
+  return container.textContent || container.innerText || "";
+}
+
 function dollarsToCents(value) {
   const numberValue = Number(value || 0);
   if (!Number.isFinite(numberValue) || numberValue < 0) {
@@ -2289,6 +2687,96 @@ function initializeClassTypeControls(root) {
 
   classTypeSelect.addEventListener("change", syncWeekdayVisibility);
   syncWeekdayVisibility();
+}
+
+function initializeNotificationAudienceControls(root) {
+  const audience = root.querySelector('select[name="audience"]');
+  const bccLabel = root.querySelector('textarea[name="bccEmails"]')?.closest("label");
+  if (!audience || !bccLabel) {
+    return;
+  }
+  const sync = () => {
+    const manual = audience.value === "manual";
+    bccLabel.hidden = !manual;
+    bccLabel.querySelector("textarea").disabled = !manual;
+  };
+  audience.addEventListener("change", sync);
+  sync();
+}
+
+function initializeEmlTemplateUpload(root) {
+  const input = root.querySelector("[data-eml-template]");
+  if (!input) {
+    return;
+  }
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    const form = input.closest("form");
+    if (!file || !form) {
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".eml")) {
+      input.setCustomValidity("Please choose a .eml file.");
+      input.reportValidity();
+      return;
+    }
+    input.setCustomValidity("");
+    const raw = await file.text();
+    const template = parseEmlTemplate(raw);
+    if (template.subject) {
+      setFormValue(form, "subject", template.subject);
+    }
+    if (template.ccEmails.length) {
+      setFormValue(form, "ccEmails", template.ccEmails.join(", "));
+    }
+    setFormValue(form, "templateEml", raw);
+    setFormValue(form, "body", "Email body is provided by the uploaded .eml template.");
+    updateDirtyForm(form);
+  });
+}
+
+function initializeNotificationWizard(root) {
+  const form = root.querySelector("[data-operation-form]");
+  const stepInput = form?.querySelector("[data-notification-step-value]");
+  if (!form || !stepInput) {
+    return;
+  }
+  const submitButton = form.querySelector('button[type="submit"]');
+  const backButton = form.querySelector("[data-wizard-back]");
+  const nextButton = form.querySelector("[data-wizard-next]");
+
+  const currentStep = () => Number(stepInput.value || 1);
+  const stepSection = (step) => form.querySelector(`[data-wizard-step="${step}"]`);
+  const sync = () => {
+    const step = currentStep();
+    form.querySelectorAll("[data-wizard-step]").forEach((section) => {
+      const active = Number(section.dataset.wizardStep) === step;
+      section.hidden = !active;
+    });
+    form.querySelectorAll("[data-wizard-indicator]").forEach((indicator) => {
+      indicator.classList.toggle("is-active", Number(indicator.dataset.wizardIndicator) === step);
+      indicator.classList.toggle("is-complete", Number(indicator.dataset.wizardIndicator) < step);
+    });
+    backButton.disabled = step === 1;
+    nextButton.hidden = step === 4;
+    if (submitButton) {
+      submitButton.hidden = step !== 4;
+    }
+    updateDirtyForm(form);
+  };
+  const goToStep = (step) => {
+    stepInput.value = String(Math.max(1, Math.min(4, step)));
+    sync();
+  };
+  nextButton?.addEventListener("click", () => {
+    const section = stepSection(currentStep());
+    if (section && !Array.from(section.querySelectorAll("input, textarea, select")).every((field) => field.reportValidity())) {
+      return;
+    }
+    goToStep(currentStep() + 1);
+  });
+  backButton?.addEventListener("click", () => goToStep(currentStep() - 1));
+  sync();
 }
 
 function initializeGooglePlacesAutocomplete(root) {

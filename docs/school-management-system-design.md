@@ -564,8 +564,8 @@ GET /api/parents/me/children/:childId/attendance
 
 ```http
 GET /api/tenants/:tenantId/notification-providers
-POST /api/tenants/:tenantId/notification-providers
-PATCH /api/tenants/:tenantId/notification-providers/:providerId
+POST /api/tenants/:tenantId/notification-providers/gmail/start
+GET /api/oauth/google/gmail/callback
 
 POST /api/tenants/:tenantId/notifications
 GET /api/tenants/:tenantId/notification-history
@@ -1348,6 +1348,8 @@ unique(lower(email))
 
 Email should be normalized before storage and lookup.
 
+Phone number is required for every user. Email remains the login identity, but phone is a first-class required contact field for parents, teachers, school admins, and platform admins. New users cannot complete registration without a phone number. Google login can link to an existing user that already has a phone number; creating a brand-new Google-only user requires an additional phone collection step before account activation.
+
 Example `metadata` values:
 
 ```json
@@ -1473,16 +1475,22 @@ Example `metadata` values:
 ```json
 {
   "address": {
-    "line1": "123 Main St",
-    "line2": "Suite 200",
+    "streetAddress": "123 Main St",
+    "suite": "Suite 200",
     "city": "Ann Arbor",
     "state": "MI",
-    "postalCode": "48104"
+    "zipCode": "48104",
+    "googlePlaceId": "ChIJN1t_tDeuEmsRUsoyG83frY4",
+    "formattedAddress": "123 Main St, Ann Arbor, MI 48104, USA",
+    "latitude": "42.2808",
+    "longitude": "-83.7430"
   },
-  "contact": {
+  "owner": {
+    "fullName": "Longlong Admin",
     "phone": "555-0100",
-    "email": "site@example.com"
-  }
+    "email": "school.admin@longlong-art-studio.test"
+  },
+  "gradeLevelsServed": "Preschool, K-5"
 }
 ```
 

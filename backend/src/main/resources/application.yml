@@ -29,6 +29,13 @@ schooldays:
       redirect-uri: ${SCHOOLDAYS_GOOGLE_REDIRECT_URI:http://localhost:8080/api/auth/google/callback}
       token-uri: ${SCHOOLDAYS_GOOGLE_TOKEN_URI:https://oauth2.googleapis.com/token}
       user-info-uri: ${SCHOOLDAYS_GOOGLE_USER_INFO_URI:https://openidconnect.googleapis.com/v1/userinfo}
+  gmail:
+    client-id: ${SCHOOLDAYS_GMAIL_CLIENT_ID:}
+    client-secret: ${SCHOOLDAYS_GMAIL_CLIENT_SECRET:}
+    redirect-uri: ${SCHOOLDAYS_GMAIL_REDIRECT_URI:http://localhost:8080/api/oauth/google/gmail/callback}
+    token-uri: ${SCHOOLDAYS_GMAIL_TOKEN_URI:https://oauth2.googleapis.com/token}
+    user-info-uri: ${SCHOOLDAYS_GMAIL_USER_INFO_URI:https://openidconnect.googleapis.com/v1/userinfo}
+    send-uri: ${SCHOOLDAYS_GMAIL_SEND_URI:https://gmail.googleapis.com/gmail/v1/users/me/messages/send}
   seed-test-data:
     enabled: ${SCHOOLDAYS_SEED_TEST_DATA:false}
 
