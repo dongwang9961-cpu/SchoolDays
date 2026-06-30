@@ -5,7 +5,8 @@ import { bestSchoolRole, renderSchoolDashboard } from "./schoolAdminDashboard.js
 import "./styles.css";
 
 const urlParams = new URLSearchParams(window.location.search);
-const schoolSlug = getSchoolSlugFromPath(window.location.pathname);
+const schoolRoute = getSchoolRouteFromPath(window.location.pathname);
+const schoolSlug = schoolRoute.slug;
 const schoolLookup = schoolSlug ? await loadSchool(schoolSlug) : { school: null, error: null };
 const school = schoolLookup.school;
 const schoolLoadError = schoolSlug && !school;
@@ -22,9 +23,13 @@ renderAuthPage({
   tenantId: school?.tenantId || "",
 });
 
-function getSchoolSlugFromPath(pathname) {
+function getSchoolRouteFromPath(pathname) {
   const segments = pathname.split("/").filter(Boolean);
-  return segments[0] === "school" && segments[1] ? segments[1].toLowerCase() : "";
+  if (segments[0] !== "school" || !segments[1]) {
+    return { slug: "", portal: "parent" };
+  }
+  const portal = segments[2] === "t" ? "teacher" : segments[2] === "admin" ? "admin" : "parent";
+  return { slug: segments[1].toLowerCase(), portal };
 }
 
 async function loadSchool(slug) {
@@ -40,6 +45,12 @@ function getInitialMode() {
     return "login";
   }
   if (urlParams.get("token")) {
+    if (schoolRoute.portal === "teacher") {
+      return "teacher";
+    }
+    if (schoolRoute.portal === "admin") {
+      return "school";
+    }
     return "complete";
   }
   return "login";
@@ -49,17 +60,46 @@ function modeOptions() {
   if (!school) {
     return [{ value: "login", label: "Sign in" }];
   }
+  if (urlParams.get("token")) {
+    return [{ value: getInitialMode(), label: completionModeLabel() }];
+  }
+  if (schoolRoute.portal === "teacher") {
+    return [{ value: "login", label: "Teacher sign in" }];
+  }
+  if (schoolRoute.portal === "admin") {
+    return [{ value: "login", label: "Admin sign in" }];
+  }
   return [
-    { value: "login", label: "Sign in" },
+    { value: "login", label: "Parent sign in" },
     { value: "register", label: "Parent register" },
-    { value: "complete", label: "Complete parent registration" },
-    { value: "teacher", label: "Teacher invite" },
   ];
+}
+
+function completionModeLabel() {
+  if (schoolRoute.portal === "teacher") {
+    return "Complete teacher invitation";
+  }
+  if (schoolRoute.portal === "admin") {
+    return "Complete school invitation";
+  }
+  return "Complete parent registration";
 }
 
 function brandDescription() {
   if (school) {
-    return "Parents can register for this school, and teachers can accept invitations for this school.";
+    if (schoolRoute.portal === "teacher") {
+      return urlParams.get("token")
+        ? "Complete the remaining steps from your teacher invitation email."
+        : "Teachers can sign in to this school.";
+    }
+    if (schoolRoute.portal === "admin") {
+      return urlParams.get("token")
+        ? "Complete the remaining steps from your school administrator invitation email."
+        : "School administrators can sign in to this school.";
+    }
+    return urlParams.get("token")
+      ? "Complete the remaining steps from your parent registration email."
+      : "Parents can sign in or register for this school.";
   }
   if (schoolLoadError) {
     return schoolLookupErrorText();
@@ -69,12 +109,22 @@ function brandDescription() {
 
 function schoolContextMarkup() {
   if (school) {
-    return contextNote(`School website: <strong>${escapeHtml(school.slug)}</strong>`);
+    return contextNote(`${portalLabel()} portal: <strong>${escapeHtml(school.slug)}</strong>`);
   }
   if (schoolLoadError) {
     return contextError(schoolLookupErrorText());
   }
   return contextError("School is missing from the URL.");
+}
+
+function portalLabel() {
+  if (schoolRoute.portal === "teacher") {
+    return "Teacher";
+  }
+  if (schoolRoute.portal === "admin") {
+    return "Admin";
+  }
+  return "Parent";
 }
 
 function schoolLookupErrorText() {

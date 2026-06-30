@@ -33,14 +33,16 @@ export function renderAuthPage({
         <section class="auth-panel">
           ${contextMarkup}
 
-          <div class="mode-selector">
-            <label>
-              <span>Action</span>
-              <select data-mode-select aria-label="Authentication action">
-                ${modeOptions(modes)}
-              </select>
-            </label>
-          </div>
+          ${modes.length > 1 ? `
+            <div class="mode-selector">
+              <label>
+                <span>Action</span>
+                <select data-mode-select aria-label="Authentication action">
+                  ${modeOptions(modes)}
+                </select>
+              </label>
+            </div>
+          ` : ""}
 
           ${loginForm()}
           ${parentRegisterForm()}
@@ -60,10 +62,9 @@ export function renderAuthPage({
     input.value = initialToken;
   });
 
-  modeSelect.value = initialMode;
   showMode(initialMode);
 
-  modeSelect.addEventListener("change", () => showMode(modeSelect.value));
+  modeSelect?.addEventListener("change", () => showMode(modeSelect.value));
   googleRegisterButton?.addEventListener("click", handleGoogleRegistration);
 
   forms.forEach((form) => {
@@ -71,7 +72,9 @@ export function renderAuthPage({
   });
 
   function showMode(mode) {
-    modeSelect.value = mode;
+    if (modeSelect) {
+      modeSelect.value = mode;
+    }
     forms.forEach((form) => {
       form.hidden = form.dataset.authForm !== mode;
     });

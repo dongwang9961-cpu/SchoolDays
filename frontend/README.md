@@ -39,6 +39,20 @@ await fetch("/api/auth/login", {
 
 Start the backend from `../backend` before using proxied API calls.
 
+## School Login URLs
+
+Each school has separate entry URLs:
+
+```text
+/school/longlong-art-studio
+/school/longlong-art-studio/t
+/school/longlong-art-studio/admin
+```
+
+The base school URL is for parents, `/t` is for teachers, and `/admin` is for school administrators.
+
+The frontend is a single-page JavaScript app. All browser routes are handled by `src/main.js`; the host only needs to serve `index.html` for deep links instead of redirecting the URL.
+
 ## Production API
 
 For local development, leave `VITE_API_BASE_URL` unset so Vite can proxy relative `/api` calls to `http://localhost:8080`.

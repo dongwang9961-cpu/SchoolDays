@@ -4,19 +4,21 @@ import "./styles.css";
 if (window.location.pathname.startsWith("/school/")) {
   await import("./school.js");
 } else {
-const urlParams = new URLSearchParams(window.location.search);
-const initialMode = urlParams.get("token") ? "school" : "login";
+  const urlParams = new URLSearchParams(window.location.search);
+  const hasToken = Boolean(urlParams.get("token"));
+  const initialMode = hasToken ? "school" : "login";
 
-renderAuthPage({
-  brandEyebrow: "SchoolDays",
-  brandTitle: "Access the platform",
-  brandDescription: "Sign in as a platform user or accept a school administrator invitation.",
-  contextMarkup: contextNote("Platform root"),
-  initialMode,
-  modes: [
-    { value: "login", label: "Sign in" },
-    { value: "school", label: "School admin invite" },
-  ],
-  tenantId: "",
-});
+  renderAuthPage({
+    brandEyebrow: "SchoolDays",
+    brandTitle: "Access the platform",
+    brandDescription: hasToken
+      ? "Complete the remaining steps from your school administrator invitation email."
+      : "Sign in as a platform user.",
+    contextMarkup: contextNote("Platform root"),
+    initialMode,
+    modes: hasToken
+      ? [{ value: "school", label: "Complete school invitation" }]
+      : [{ value: "login", label: "Sign in" }],
+    tenantId: "",
+  });
 }
