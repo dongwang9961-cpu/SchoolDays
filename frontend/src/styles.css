@@ -935,6 +935,139 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.enrollment-detail-row {
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  cursor: pointer;
+}
+
+.enrollment-detail-row:hover,
+.enrollment-detail-row.is-selected {
+  background: #f4f8ff;
+}
+
+.enrollment-detail-row.is-selected {
+  box-shadow: inset 3px 0 0 #2d6cdf;
+}
+
+.attendance-calendar-panel {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 6px;
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.attendance-calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.attendance-calendar-legend span {
+  align-items: center;
+  color: #5f6f86;
+  display: inline-flex;
+  font-size: 0.9rem;
+  gap: 6px;
+}
+
+.calendar-key {
+  border: 1px solid #c7d2e4;
+  border-radius: 3px;
+  display: inline-block;
+  height: 12px;
+  width: 12px;
+}
+
+.calendar-key.checked {
+  background: #dff5e8;
+  border-color: #63c184;
+}
+
+.calendar-key.scheduled {
+  background: #f8fbff;
+}
+
+.calendar-key.missed {
+  background: #fff3e2;
+  border-color: #e7a448;
+}
+
+.attendance-calendar-months {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.attendance-calendar-month {
+  display: grid;
+  gap: 8px;
+}
+
+.attendance-calendar-month h4 {
+  color: #18233a;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-weekdays span {
+  color: #6a7890;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.calendar-day {
+  align-items: center;
+  aspect-ratio: 1;
+  border: 1px solid #d8deeb;
+  border-radius: 4px;
+  color: #22314a;
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+  padding: 4px 2px;
+}
+
+.calendar-day strong {
+  font-size: 0.9rem;
+}
+
+.calendar-day small {
+  color: #5f6f86;
+  font-size: 0.72rem;
+  min-height: 1em;
+}
+
+.calendar-day.is-empty {
+  border-color: transparent;
+}
+
+.calendar-day.is-unscheduled {
+  background: #f5f7fb;
+  color: #8a97ab;
+}
+
+.calendar-day.is-missed {
+  background: #fff3e2;
+  border-color: #e7a448;
+}
+
+.calendar-day.is-checked {
+  background: #dff5e8;
+  border-color: #63c184;
+}
+
 .site-management-row {
   align-items: center;
   display: grid;

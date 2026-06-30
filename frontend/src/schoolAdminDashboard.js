@@ -237,6 +237,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let selectedChildId = "";
   let loadingChildren = false;
   let enrollments = [];
+  let selectedEnrollmentId = "";
   let loadingEnrollments = false;
   let attendanceRecords = [];
   let loadingAttendance = false;
@@ -372,6 +373,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         }
         if (activeSectionId === "enrollments") {
           loadEnrollments();
+          loadAttendance();
         }
         if (activeSectionId === "attendance") {
           loadChildren();
@@ -681,6 +683,21 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         error = "";
         render();
       });
+    });
+    root.querySelectorAll("[data-enrollment-detail-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedEnrollmentId = button.dataset.enrollmentDetailId;
+        notice = "";
+        error = "";
+        render();
+        loadAttendance();
+      });
+    });
+    root.querySelector("[data-enrollment-detail-close]")?.addEventListener("click", () => {
+      selectedEnrollmentId = "";
+      notice = "";
+      error = "";
+      render();
     });
 
     initializeGooglePlacesAutocomplete(root);
@@ -1377,6 +1394,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
   function enrollmentList(rows) {
     return `
+      ${selectedEnrollmentCalendar()}
       <div class="data-list enrollment-list" aria-label="Enrollments">
         ${
           enrollments.length
@@ -1384,7 +1402,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                 const classRecord = classes.find((item) => item.id === enrollment.classId);
                 const selectedCount = enrollment.selectedOptionalFeeItemIds?.length || 0;
                 return `
-                  <div class="data-row enrollment-row">
+                  <button class="data-row enrollment-row enrollment-detail-row ${selectedEnrollmentId === enrollment.id ? "is-selected" : ""}" data-enrollment-detail-id="${escapeHtml(enrollment.id)}" type="button">
                     <div>
                       <strong>${escapeHtml(classRecord?.name || "Class")}</strong>
                       <span>${escapeHtml(childName(enrollment.childId))}</span>
@@ -1399,14 +1417,133 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                     </div>
                     <div>
                       <span>${escapeHtml(selectedCount ? `${selectedCount} optional add-on${selectedCount === 1 ? "" : "s"}` : "No optional add-ons")}</span>
+                      <span>View attendance calendar</span>
                     </div>
-                  </div>
+                  </button>
                 `;
               }).join("")
             : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
         }
       </div>
     `;
+  }
+
+  function selectedEnrollmentCalendar() {
+    const enrollment = selectedEnrollment();
+    if (!enrollment) {
+      return "";
+    }
+    const classRecord = classes.find((item) => item.id === enrollment.classId);
+    if (!classRecord) {
+      return `
+        <section class="attendance-calendar-panel">
+          <div class="workspace-heading workspace-heading-row">
+            <div>
+              <h3>Attendance calendar</h3>
+              <p>Class details are still loading.</p>
+            </div>
+            <button class="secondary-button compact-button" data-enrollment-detail-close type="button">Back</button>
+          </div>
+        </section>
+      `;
+    }
+    const records = attendanceRecords.filter((record) =>
+      record.childId === enrollment.childId && record.classId === enrollment.classId
+    );
+    return `
+      <section class="attendance-calendar-panel" aria-label="Enrollment attendance calendar">
+        <div class="workspace-heading workspace-heading-row">
+          <div>
+            <h3>${escapeHtml(classRecord.name)} attendance</h3>
+            <p>${escapeHtml(`${childName(enrollment.childId)} - ${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}`)}</p>
+          </div>
+          <button class="secondary-button compact-button" data-enrollment-detail-close type="button">Back</button>
+        </div>
+        ${attendanceCalendar(classRecord, records)}
+      </section>
+    `;
+  }
+
+  function selectedEnrollment() {
+    if (!selectedEnrollmentId) {
+      return null;
+    }
+    return enrollments.find((enrollment) => enrollment.id === selectedEnrollmentId) || null;
+  }
+
+  function attendanceCalendar(classRecord, records) {
+    const months = calendarMonths(classRecord.startDate, classRecord.endDate);
+    if (!months.length) {
+      return `<p class="context-note">Class schedule dates are unavailable.</p>`;
+    }
+    const checkedInDates = new Set(records.map((record) => record.classDate));
+    return `
+      <div class="attendance-calendar-legend">
+        <span><i class="calendar-key checked"></i>Checked in</span>
+        <span><i class="calendar-key scheduled"></i>Scheduled</span>
+        <span><i class="calendar-key missed"></i>No check-in</span>
+      </div>
+      <div class="attendance-calendar-months">
+        ${months.map((month) => attendanceCalendarMonth(classRecord, month, checkedInDates)).join("")}
+      </div>
+    `;
+  }
+
+  function attendanceCalendarMonth(classRecord, monthStart, checkedInDates) {
+    const monthLabel = monthStart.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    const blanks = Array.from({ length: monthStart.getDay() }, () => `<span class="calendar-day is-empty" aria-hidden="true"></span>`).join("");
+    const days = [];
+    const cursor = new Date(monthStart);
+    while (cursor.getMonth() === monthStart.getMonth()) {
+      const value = localDateValue(cursor);
+      const scheduled = isScheduledClassDate(classRecord, value);
+      const checked = checkedInDates.has(value);
+      const statusClass = checked ? "is-checked" : scheduled ? "is-missed" : "is-unscheduled";
+      const statusLabel = checked ? "Checked in" : scheduled ? "No check-in" : "No class";
+      days.push(`
+        <span class="calendar-day ${statusClass}" title="${escapeHtml(`${formatDate(value)} - ${statusLabel}`)}">
+          <strong>${cursor.getDate()}</strong>
+          <small>${scheduled ? (checked ? "In" : "-") : ""}</small>
+        </span>
+      `);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return `
+      <section class="attendance-calendar-month">
+        <h4>${escapeHtml(monthLabel)}</h4>
+        <div class="calendar-weekdays" aria-hidden="true">
+          ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<span>${day}</span>`).join("")}
+        </div>
+        <div class="calendar-grid">${blanks}${days.join("")}</div>
+      </section>
+    `;
+  }
+
+  function calendarMonths(startDate, endDate) {
+    if (!startDate || !endDate) {
+      return [];
+    }
+    const start = dateFromLocalValue(startDate);
+    const end = dateFromLocalValue(endDate);
+    const months = [];
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    const last = new Date(end.getFullYear(), end.getMonth(), 1);
+    while (cursor <= last) {
+      months.push(new Date(cursor));
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return months;
+  }
+
+  function isScheduledClassDate(classRecord, dateValue) {
+    if (!classRecord?.startDate || !classRecord?.endDate || dateValue < classRecord.startDate || dateValue > classRecord.endDate) {
+      return false;
+    }
+    if (classRecord.classType === "weekly" && classRecord.weekdays?.length) {
+      const weekday = dateFromLocalValue(dateValue).toLocaleDateString("en-US", { weekday: "long" }).toUpperCase();
+      return classRecord.weekdays.includes(weekday);
+    }
+    return true;
   }
 
   function parentPaymentList(rows) {
@@ -1576,6 +1713,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       return [days, time].filter(Boolean).join(" ");
     }
     return time || "Time range";
+  }
+
+  function dateFromLocalValue(value) {
+    const [year, month, day] = String(value).split("-").map(Number);
+    return new Date(year, month - 1, day);
   }
 
   function resetSiteWorkspaceData() {

@@ -18,6 +18,7 @@ import com.schooldays.dto.attendance.AttendanceCheckInRequest;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import org.flywaydb.core.Flyway;
 import org.jooq.DSLContext;
+import org.jooq.JSONB;
 import org.jooq.SQLDialect;
 import org.jooq.impl.DSL;
 import org.junit.jupiter.api.AfterAll;
@@ -107,6 +108,14 @@ class AttendanceServiceTests {
                 .set(CLASSES.NAME, "Morning Art")
                 .set(CLASSES.START_DATE, LocalDate.parse("2026-07-01"))
                 .set(CLASSES.END_DATE, LocalDate.parse("2026-07-31"))
+                .set(CLASSES.METADATA, JSONB.valueOf("""
+                        {
+                          "classType": "weekly",
+                          "weekdays": ["MONDAY", "WEDNESDAY"],
+                          "startTime": "09:00",
+                          "endTime": "13:00"
+                        }
+                        """))
                 .set(CLASSES.STATUS, "active")
                 .execute();
         dsl.insertInto(CHILDREN)
@@ -147,5 +156,18 @@ class AttendanceServiceTests {
                     assertThat(entry.classId()).isEqualTo(classId);
                     assertThat(entry.classDate()).isEqualTo(LocalDate.parse("2026-07-15"));
                 });
+    }
+
+    @Test
+    void parentCannotCheckInOnDateWithoutScheduledClass() {
+        org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> attendanceService.parentCheckIn(
+                        parentUserId,
+                        new AttendanceCheckInRequest(tenantId, childId, classId, LocalDate.parse("2026-07-16"))
+                )
+        );
+
+        assertThat(dsl.fetchCount(ATTENDANCE)).isZero();
     }
 }

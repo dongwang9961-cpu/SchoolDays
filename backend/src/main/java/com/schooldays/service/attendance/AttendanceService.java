@@ -5,6 +5,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schooldays.dao.attendance.AttendanceDao;
 import com.schooldays.dto.attendance.AttendanceCheckInRequest;
 import com.schooldays.dto.attendance.AttendanceListResponse;
@@ -17,6 +19,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AttendanceService {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final String TYPE_WEEKLY = "weekly";
 
     private final AttendanceDao attendanceDao;
 
@@ -83,5 +88,34 @@ public class AttendanceService {
         if (classDate.isBefore(classRecord.getStartDate()) || classDate.isAfter(classRecord.getEndDate())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Class date must be within the class date range");
         }
+        JsonNode metadata = classMetadata(classRecord);
+        String classType = metadata.path("classType").asText("");
+        List<String> weekdays = weekdays(metadata);
+        if (TYPE_WEEKLY.equalsIgnoreCase(classType) && !weekdays.isEmpty()) {
+            String requestedWeekday = classDate.getDayOfWeek().name();
+            if (!weekdays.contains(requestedWeekday)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Class date is not a scheduled class day");
+            }
+        }
+    }
+
+    private JsonNode classMetadata(ClassesRecord classRecord) {
+        try {
+            return OBJECT_MAPPER.readTree(classRecord.getMetadata() == null ? "{}" : classRecord.getMetadata().data());
+        } catch (Exception ignored) {
+            return OBJECT_MAPPER.createObjectNode();
+        }
+    }
+
+    private List<String> weekdays(JsonNode metadata) {
+        JsonNode weekdays = metadata.path("weekdays");
+        if (!weekdays.isArray()) {
+            return List.of();
+        }
+        return java.util.stream.StreamSupport.stream(weekdays.spliterator(), false)
+                .map(JsonNode::asText)
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.trim().toUpperCase())
+                .toList();
     }
 }
