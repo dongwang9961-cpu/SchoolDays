@@ -86,7 +86,7 @@ function schoolLookupErrorText() {
     return `School "${schoolSlug}" was not found. Run the backend with seed test data enabled or create a tenant with slug "longlong-art-studio".`;
   }
   if (schoolLookup.error) {
-    return `School "${schoolSlug}" could not be loaded. Check that the backend is running on http://localhost:8080.`;
+    return `School "${schoolSlug}" could not be loaded. Check the API server connection and try again.`;
   }
   return `School "${schoolSlug}" was not found.`;
 }
