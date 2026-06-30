@@ -337,16 +337,27 @@ button:disabled {
   color: #1f6b3a;
 }
 
+.enrollment-wizard-steps {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.enrollment-wizard {
+  display: grid;
+  gap: 18px;
+}
+
 .notification-wizard {
   display: grid;
   gap: 18px;
 }
 
+.enrollment-wizard section,
 .notification-wizard section {
   display: grid;
   gap: 14px;
 }
 
+.enrollment-wizard section[hidden],
 .notification-wizard section[hidden],
 .wizard-actions button[hidden] {
   display: none;
@@ -900,6 +911,30 @@ button:disabled {
   background: #f8fbff;
 }
 
+.enrollment-row {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.8fr);
+}
+
+.enrollment-row > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.enrollment-row strong,
+.enrollment-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.enrollment-row span {
+  color: #5f6f86;
+  font-size: 0.9rem;
+}
+
 .site-management-row {
   align-items: center;
   display: grid;
@@ -1108,6 +1143,10 @@ button:disabled {
 
   .site-management-row {
     align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .enrollment-row {
     grid-template-columns: 1fr;
   }
 

@@ -2,16 +2,15 @@ package com.schooldays.controller;
 
 import java.util.UUID;
 
-import com.schooldays.dto.api.EndpointStatusResponse;
+import com.schooldays.dto.attendance.AttendanceListResponse;
 import com.schooldays.dto.child.ChildListResponse;
 import com.schooldays.dto.child.ChildRequest;
 import com.schooldays.dto.child.ChildResponse;
+import com.schooldays.service.attendance.AttendanceService;
 import com.schooldays.service.child.ChildService;
 import jakarta.validation.Valid;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,9 +24,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/parents/me")
 public class ParentChildController extends ApiPlaceholderSupport {
 
+    private final AttendanceService attendanceService;
     private final ChildService childService;
 
-    public ParentChildController(ChildService childService) {
+    public ParentChildController(AttendanceService attendanceService, ChildService childService) {
+        this.attendanceService = attendanceService;
         this.childService = childService;
     }
 
@@ -59,10 +60,23 @@ public class ParentChildController extends ApiPlaceholderSupport {
         return childService.updateChild(userId(authentication), childId, request);
     }
 
+    @GetMapping("/attendance")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'PARENT')")
+    public AttendanceListResponse listAttendance(
+            @RequestParam("tenantId") UUID tenantId,
+            Authentication authentication
+    ) {
+        return attendanceService.listParentAttendance(tenantId, userId(authentication));
+    }
+
     @GetMapping("/children/{childId}/attendance")
-    @PreAuthorize("hasRole('PARENT')")
-    public ResponseEntity<EndpointStatusResponse> getChildAttendance(@PathVariable("childId") UUID childId) {
-        return notImplemented("GET /api/parents/me/children/{childId}/attendance");
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'PARENT')")
+    public AttendanceListResponse getChildAttendance(
+            @RequestParam("tenantId") UUID tenantId,
+            @PathVariable("childId") UUID childId,
+            Authentication authentication
+    ) {
+        return attendanceService.listParentChildAttendance(tenantId, userId(authentication), childId);
     }
 
 }

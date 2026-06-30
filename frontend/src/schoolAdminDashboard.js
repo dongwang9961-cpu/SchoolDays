@@ -1,5 +1,6 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
+import { checkInAttendance, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { createClass, listAvailableClasses, listClasses, updateClass } from "./api/classes.js";
 import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
@@ -165,8 +166,8 @@ const parentSections = [
     id: "enrollments",
     label: "Enrollments",
     title: "Enrollments",
-    summary: "Track pending and active class registrations.",
-    actions: ["Register child", "View enrollment"],
+    summary: "Review your children’s class registrations and enrollment status.",
+    actions: [],
     rows: ["No enrollment records loaded yet."],
   },
   {
@@ -174,7 +175,7 @@ const parentSections = [
     label: "Payments",
     title: "Payments",
     summary: "Pay required fees, upload receipts, and review payment history.",
-    actions: ["Pay with Stripe", "Upload receipt", "View payments"],
+    actions: [],
     rows: ["No payment records loaded yet."],
   },
   {
@@ -182,7 +183,7 @@ const parentSections = [
     label: "Attendance",
     title: "Attendance",
     summary: "Check in children and review attendance history.",
-    actions: ["Check in child", "View attendance"],
+    actions: ["Check in child"],
     rows: ["No attendance records loaded yet."],
   },
 ];
@@ -237,6 +238,8 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let loadingChildren = false;
   let enrollments = [];
   let loadingEnrollments = false;
+  let attendanceRecords = [];
+  let loadingAttendance = false;
   let enrollmentModalOpen = false;
   let enrollmentPricing = null;
   let loadingEnrollmentPricing = false;
@@ -249,7 +252,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     loadSites();
   } else if (role === "PARENT") {
     loadChildren();
+    loadClasses();
     loadEnrollments();
+    loadAttendance();
   }
 
   window.addEventListener("message", (event) => {
@@ -279,6 +284,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     const currentSite = selectedSite();
     const title = role === "SCHOOL_ADMIN" && adminMode === "site" && currentSite ? currentSite.name : dashboard.label;
     const notificationModalOpen = activeOperation && isNotificationOperation(activeOperation);
+    const activeOperationPanel = parentAttendanceOperation(activeSection, activeOperation)
+      ? parentAttendancePanel()
+      : activeOperation && !notificationModalOpen
+        ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedChild(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing)
+        : "";
 
     root.innerHTML = `
       <main class="app-shell">
@@ -329,7 +339,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             </div>
 
             ${error ? `<p class="message error" role="alert">${escapeHtml(error)}</p>` : ""}
-            ${activeOperation && !notificationModalOpen ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedChild(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
+            ${activeOperationPanel}
 
             ${dataList(activeSection, rows)}
           </section>
@@ -361,6 +371,16 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
           loadClasses();
         }
         if (activeSectionId === "enrollments") {
+          loadEnrollments();
+        }
+        if (activeSectionId === "attendance") {
+          loadChildren();
+          loadClasses();
+          loadEnrollments();
+          loadAttendance();
+        }
+        if (activeSectionId === "payments") {
+          loadClasses();
           loadEnrollments();
         }
       });
@@ -521,6 +541,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     });
     root.querySelector("[data-enrollment-cancel]")?.addEventListener("click", closeEnrollmentModal);
     root.querySelector("[data-enrollment-form]")?.addEventListener("submit", handleEnrollmentSubmit);
+    root.querySelector("[data-attendance-form]")?.addEventListener("submit", handleAttendanceSubmit);
 
     root.querySelector("[data-operation-form]")?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -545,6 +566,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     initializeNotificationAudienceControls(root);
     initializeEmlTemplateUpload(root);
     initializeNotificationWizard(root);
+    initializeEnrollmentWizard(root);
     initializeDirtyForms(root);
     root.querySelector("[data-send-test-notification]")?.addEventListener("click", async (event) => {
       await handleTestNotification(event.currentTarget);
@@ -1063,6 +1085,18 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       }
       return enrollments.length ? [] : ["No enrollments yet."];
     }
+    if (section.id === "attendance" && role === "PARENT") {
+      if (loadingAttendance) {
+        return ["Loading attendance..."];
+      }
+      return attendanceRecords.length ? [] : ["No attendance records yet."];
+    }
+    if (section.id === "payments" && role === "PARENT") {
+      if (loadingEnrollments) {
+        return ["Loading payments..."];
+      }
+      return pendingPaymentEnrollments().length ? [] : ["No pending payments."];
+    }
     if (section.id === "notifications") {
       if (loadingNotifications) {
         return ["Loading notification history..."];
@@ -1240,22 +1274,17 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         </div>
       `;
     }
-    if (section.id === "enrollments" && role === "PARENT" && enrollments.length) {
+    if (section.id === "enrollments" && role === "PARENT") {
       return `
-        <div class="data-list" aria-label="Enrollments">
-          ${enrollments.map((enrollment) => {
-            const child = children.find((item) => item.id === enrollment.childId);
-            const classRecord = classes.find((item) => item.id === enrollment.classId);
-            return `
-              <div class="data-row enrollment-row">
-                <strong>${escapeHtml(classRecord?.name || "Class")}</strong>
-                <span>${escapeHtml(child ? `${child.firstName} ${child.lastName}`.trim() : "Child")}</span>
-                <span>${escapeHtml(enrollment.status || "pending")}</span>
-              </div>
-            `;
-          }).join("")}
-        </div>
+        ${enrollmentSummary()}
+        ${enrollmentList(rows)}
       `;
+    }
+    if (section.id === "attendance" && role === "PARENT") {
+      return attendanceList(rows);
+    }
+    if (section.id === "payments" && role === "PARENT") {
+      return parentPaymentList(rows);
     }
     return `
       <div class="data-list">
@@ -1334,6 +1363,150 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     return children.find((child) => child.id === selectedChildId);
   }
 
+  function enrollmentSummary() {
+    if (!enrollments.length) {
+      return "";
+    }
+    const activeCount = enrollments.filter((enrollment) => !["cancelled", "rejected"].includes(String(enrollment.status || "").toLowerCase())).length;
+    return `
+      <p class="context-note">
+        ${escapeHtml(`${activeCount} active registration${activeCount === 1 ? "" : "s"} across ${enrollments.length} total enrollment record${enrollments.length === 1 ? "" : "s"}.`)}
+      </p>
+    `;
+  }
+
+  function enrollmentList(rows) {
+    return `
+      <div class="data-list enrollment-list" aria-label="Enrollments">
+        ${
+          enrollments.length
+            ? enrollments.map((enrollment) => {
+                const classRecord = classes.find((item) => item.id === enrollment.classId);
+                const selectedCount = enrollment.selectedOptionalFeeItemIds?.length || 0;
+                return `
+                  <div class="data-row enrollment-row">
+                    <div>
+                      <strong>${escapeHtml(classRecord?.name || "Class")}</strong>
+                      <span>${escapeHtml(childName(enrollment.childId))}</span>
+                    </div>
+                    <div>
+                      <span>${escapeHtml(enrollmentDateRange(classRecord))}</span>
+                      <span>${escapeHtml(classRecord ? classScheduleText(classRecord) : "Schedule unavailable")}</span>
+                    </div>
+                    <div>
+                      <strong>${escapeHtml(statusLabel(enrollment.status || "pending"))}</strong>
+                      <span>${escapeHtml(`Registered ${formatDate(enrollment.createdAt) || "date unavailable"}`)}</span>
+                    </div>
+                    <div>
+                      <span>${escapeHtml(selectedCount ? `${selectedCount} optional add-on${selectedCount === 1 ? "" : "s"}` : "No optional add-ons")}</span>
+                    </div>
+                  </div>
+                `;
+              }).join("")
+            : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
+        }
+      </div>
+    `;
+  }
+
+  function parentPaymentList(rows) {
+    const pending = pendingPaymentEnrollments();
+    return `
+      <div class="data-list enrollment-list" aria-label="Pending payments">
+        ${
+          pending.length
+            ? pending.map((enrollment) => {
+                const classRecord = classes.find((item) => item.id === enrollment.classId);
+                return `
+                  <div class="data-row enrollment-row">
+                    <div>
+                      <strong>${escapeHtml(classRecord?.name || "Class")}</strong>
+                      <span>${escapeHtml(childName(enrollment.childId))}</span>
+                    </div>
+                    <div>
+                      <span>${escapeHtml(classRecord ? enrollmentDateRange(classRecord) : "Date range unavailable")}</span>
+                      <span>${escapeHtml(classRecord ? classScheduleText(classRecord) : "Schedule unavailable")}</span>
+                    </div>
+                    <div>
+                      <strong>${escapeHtml(statusLabel(enrollment.status))}</strong>
+                      <span>${escapeHtml(`Registered ${formatDate(enrollment.createdAt) || "date unavailable"}`)}</span>
+                    </div>
+                    <div>
+                      <button class="secondary-button compact-button" disabled type="button">Pay online</button>
+                      <span>Payment processor setup pending</span>
+                    </div>
+                  </div>
+                `;
+              }).join("")
+            : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
+        }
+      </div>
+    `;
+  }
+
+  function pendingPaymentEnrollments() {
+    return enrollments.filter((enrollment) => String(enrollment.status || "").toLowerCase() === "pending_payment");
+  }
+
+  function attendanceList(rows) {
+    return `
+      <div class="data-list" aria-label="Attendance history">
+        ${
+          attendanceRecords.length
+            ? attendanceRecords.map((record) => `
+              <div class="data-row enrollment-row">
+                <strong>${escapeHtml(record.className || className(record.classId))}</strong>
+                <span>${escapeHtml(record.childName || childName(record.childId))}</span>
+                <span>${escapeHtml(`${formatDate(record.classDate)} - ${attendanceStatusLabel(record.status)}`)}</span>
+                <span>${escapeHtml(record.checkedInAt ? new Date(record.checkedInAt).toLocaleString() : "")}</span>
+              </div>
+            `).join("")
+            : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
+        }
+      </div>
+    `;
+  }
+
+  function parentAttendancePanel() {
+    const eligibleEnrollments = enrollments
+      .filter((enrollment) => !["cancelled", "rejected"].includes(String(enrollment.status || "").toLowerCase()))
+      .filter((enrollment) => children.some((child) => child.id === enrollment.childId))
+      .filter((enrollment) => classes.some((classRecord) => classRecord.id === enrollment.classId));
+    const defaultEnrollment = eligibleEnrollments[0];
+    const defaultClass = defaultEnrollment ? classes.find((classRecord) => classRecord.id === defaultEnrollment.classId) : null;
+    const defaultDate = defaultClass ? defaultAttendanceDate(defaultClass) : localDateValue(new Date());
+    return `
+      <form class="operation-panel" data-attendance-form>
+        <div class="workspace-heading">
+          <h3>Check in child</h3>
+          <p>Save attendance for a child already enrolled in a class.</p>
+        </div>
+        <label>
+          <span>Child and class <span class="required-marker" aria-label="required">*</span></span>
+          <select name="attendanceTarget" required ${eligibleEnrollments.length ? "" : "disabled"}>
+            ${
+              eligibleEnrollments.length
+                ? eligibleEnrollments.map((enrollment) => `
+                  <option value="${escapeHtml(`${enrollment.childId}|${enrollment.classId}`)}">
+                    ${escapeHtml(`${childName(enrollment.childId)} - ${className(enrollment.classId)}`)}
+                  </option>
+                `).join("")
+                : `<option value="">No enrolled children are available</option>`
+            }
+          </select>
+        </label>
+        <label>
+          <span>Class date <span class="required-marker" aria-label="required">*</span></span>
+          <input name="classDate" required type="date" value="${escapeHtml(defaultDate)}" />
+        </label>
+        <div class="operation-actions">
+          <button ${eligibleEnrollments.length ? "" : "disabled"} type="submit">Check in</button>
+          <button class="secondary-button" data-operation-cancel type="button">Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
   async function copyPublicClassLink(classId) {
     const link = `${window.location.origin}/school/${encodeURIComponent(school.slug)}/classes/${encodeURIComponent(classId)}`;
     try {
@@ -1349,6 +1522,51 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
   function programName(programId) {
     return programs.find((program) => program.id === programId)?.name || "Program";
+  }
+
+  function className(classId) {
+    return classes.find((classRecord) => classRecord.id === classId)?.name || "Class";
+  }
+
+  function childName(childId) {
+    const child = children.find((item) => item.id === childId);
+    return child ? `${child.firstName} ${child.lastName}`.trim() : "Child";
+  }
+
+  function attendanceStatusLabel(status) {
+    return statusLabel(status || "checked_in");
+  }
+
+  function formatDate(value) {
+    if (!value) {
+      return "";
+    }
+    const normalized = String(value).includes("T") ? String(value) : `${value}T00:00:00`;
+    return new Date(normalized).toLocaleDateString();
+  }
+
+  function defaultAttendanceDate(classRecord) {
+    const today = localDateValue(new Date());
+    if (classRecord.startDate && today < classRecord.startDate) {
+      return classRecord.startDate;
+    }
+    if (classRecord.endDate && today > classRecord.endDate) {
+      return classRecord.endDate;
+    }
+    return today;
+  }
+
+  function enrollmentDateRange(classRecord) {
+    if (!classRecord) {
+      return "Date range unavailable";
+    }
+    return `${formatDate(classRecord.startDate)} - ${formatDate(classRecord.endDate)}`;
+  }
+
+  function statusLabel(status) {
+    return String(status || "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
   function classScheduleText(classRecord) {
@@ -1490,6 +1708,23 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
   }
 
+  async function loadAttendance() {
+    if (loadingAttendance || !school?.tenantId || role !== "PARENT") {
+      return;
+    }
+    loadingAttendance = true;
+    try {
+      const response = await listParentAttendance(school.tenantId);
+      attendanceRecords = response.attendance || [];
+      error = "";
+    } catch (loadError) {
+      error = loadError instanceof Error ? loadError.message : "Attendance could not be loaded.";
+    } finally {
+      loadingAttendance = false;
+      render();
+    }
+  }
+
   async function openEnrollmentModal() {
     const classRecord = selectedClass();
     if (!classRecord) {
@@ -1528,11 +1763,17 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   async function handleEnrollmentSubmit(event) {
     event.preventDefault();
     const form = event.currentTarget;
+    const step = Number(form.querySelector("[data-enrollment-step-value]")?.value || 0);
+    if (step && step < 3) {
+      showTransientToast("Review the final step before submitting.", "error");
+      return;
+    }
     const selectedChildren = formValues(new FormData(form), "childIds");
     if (!selectedChildren.length) {
       showTransientToast("Select at least one child.", "error");
       return;
     }
+    const paymentPreference = formText(new FormData(form), "paymentPreference", "skip");
     const submitButton = form.querySelector("button[type='submit']");
     submitButton.disabled = true;
     submitButton.textContent = "Enrolling";
@@ -1543,17 +1784,57 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         childIds: selectedChildren,
         optionalFeeItemIds: formValues(new FormData(form), "optionalFeeItemIds"),
       });
-      notice = result.paymentRequired
-        ? "Enrollment saved. Payment is required before the enrollment is complete."
-        : "Enrollment completed.";
+      const redirectToPayments = result.paymentRequired && paymentPreference === "online";
+      notice = redirectToPayments
+        ? "Enrollment saved. Choose a pending payment to continue."
+        : result.paymentRequired
+          ? "Enrollment saved. Payment is required before the enrollment is complete."
+          : "Enrollment completed.";
       error = "";
       enrollmentModalOpen = false;
       enrollmentPricing = null;
       await loadEnrollments();
+      await loadAttendance();
+      if (redirectToPayments) {
+        activeSectionId = "payments";
+        activeOperation = "";
+      }
       render();
     } catch (enrollmentError) {
       notice = "";
       error = enrollmentError instanceof Error ? enrollmentError.message : "Enrollment could not be completed.";
+      render();
+    }
+  }
+
+  async function handleAttendanceSubmit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const [childId, classId] = String(formText(formData, "attendanceTarget") || "").split("|");
+    const classDate = formText(formData, "classDate");
+    if (!childId || !classId || !classDate) {
+      showTransientToast("Choose an enrolled child, class, and date.", "error");
+      return;
+    }
+    const submitButton = form.querySelector("button[type='submit']");
+    submitButton.disabled = true;
+    submitButton.textContent = "Checking in";
+    try {
+      await checkInAttendance({
+        tenantId: school.tenantId,
+        childId,
+        classId,
+        classDate,
+      });
+      notice = "Attendance check-in saved.";
+      error = "";
+      activeOperation = "";
+      await loadAttendance();
+      render();
+    } catch (attendanceError) {
+      notice = "";
+      error = attendanceError instanceof Error ? attendanceError.message : "Attendance check-in could not be saved.";
       render();
     }
   }
@@ -1884,7 +2165,7 @@ function updateDirtyForm(form) {
 function validateRequiredCheckboxGroups(form) {
   const groups = Array.from(form.querySelectorAll("[data-required-checkbox-group]"));
   for (const group of groups) {
-    const checked = group.querySelectorAll("input[type='checkbox']:checked").length > 0;
+    const checked = group.querySelectorAll("input[type='checkbox']:checked:not(:disabled)").length > 0;
     if (!checked) {
       group.scrollIntoView({ block: "center", behavior: "smooth" });
       const legend = group.querySelector("legend")?.textContent?.replace("*", "").trim() || group.dataset.requiredCheckboxGroup;
@@ -2034,6 +2315,7 @@ function enrollmentModal(classRecord, children, pricing, enrollments, loadingPri
   const feeItems = pricing?.feeItems || [];
   const requiredFees = feeItems.filter((item) => item.category === "required_fees");
   const optionalFees = feeItems.filter((item) => item.category === "optional_fees");
+  const requiredFeeTotal = requiredFees.reduce((total, item) => total + Number(item.fee || 0), 0);
   const enrolledChildIds = new Set((enrollments || [])
     .filter((enrollment) => enrollment.classId === classRecord?.id && !["cancelled", "rejected"].includes(enrollment.status))
     .map((enrollment) => enrollment.childId));
@@ -2041,72 +2323,143 @@ function enrollmentModal(classRecord, children, pricing, enrollments, loadingPri
   const allChildrenEnrolled = selectableChildren.length > 0 && selectableChildren.every((child) => enrolledChildIds.has(child.id));
   return `
     <div class="modal-backdrop" data-enrollment-modal>
-      <form class="operation-panel enrollment-modal-panel" data-enrollment-form>
+      <form
+        class="operation-panel enrollment-modal-panel"
+        data-enrollment-form
+        data-required-fee-total="${escapeHtml(requiredFeeTotal)}"
+        data-required-fee-currency="${escapeHtml(requiredFees[0]?.currency || "USD")}"
+      >
+        <input data-enrollment-step-value name="enrollmentStep" type="hidden" value="1" />
         <div class="workspace-heading">
           <h3>Enroll children</h3>
           <p>${escapeHtml(classRecord ? `${classRecord.name} - ${classScheduleSummary(classRecord)}` : "Choose children for this class.")}</p>
         </div>
 
-        <section class="enrollment-summary">
-          <div>
-            <strong>Required fees</strong>
-            ${
-              requiredFees.length
-                ? requiredFees.map((item) => `<span>${escapeHtml(item.name)}: ${formatMoney(item.fee, item.currency)}</span>`).join("")
-                : "<span>None</span>"
-            }
-          </div>
-          <div>
-            <strong>Status after submit</strong>
-            <span>${requiredFees.some((item) => item.fee > 0) ? "Pending payment" : "Enrolled"}</span>
-          </div>
-        </section>
+        <div class="wizard-steps enrollment-wizard-steps" aria-label="Enrollment steps">
+          ${["Children", "Fees", "Submit"].map((label, index) => `
+            <span class="${index === 0 ? "is-active" : ""}" data-enrollment-wizard-indicator="${index + 1}">${index + 1}. ${escapeHtml(label)}</span>
+          `).join("")}
+        </div>
 
-        <fieldset class="checkbox-field" data-required-checkbox-group="children">
-          <legend>Children <span class="required-marker">*</span></legend>
-          <div class="checkbox-grid two-column-checkbox-grid">
-            ${
-              selectableChildren.length
-                ? selectableChildren.map((child) => {
-                    const alreadyEnrolled = enrolledChildIds.has(child.id);
-                    return `
-                      <label class="checkbox-option ${alreadyEnrolled ? "is-disabled" : ""}">
-                        <input
-                          ${alreadyEnrolled ? "checked disabled" : ""}
-                          name="childIds"
-                          type="checkbox"
-                          value="${escapeHtml(child.id)}"
-                        />
-                        <span>${escapeHtml(`${child.firstName} ${child.lastName}`.trim())}${alreadyEnrolled ? " - already enrolled" : ""}</span>
-                      </label>
-                    `;
-                  }).join("")
-                : `<p class="context-note">Add a child before enrolling in a class.</p>`
-            }
-          </div>
-        </fieldset>
+        <div class="enrollment-wizard">
+          <section data-enrollment-wizard-step="1">
+            <fieldset class="checkbox-field" data-required-checkbox-group="children">
+              <legend>Children <span class="required-marker">*</span></legend>
+              <div class="checkbox-grid two-column-checkbox-grid">
+                ${
+                  selectableChildren.length
+                    ? selectableChildren.map((child) => {
+                        const alreadyEnrolled = enrolledChildIds.has(child.id);
+                        return `
+                          <label class="checkbox-option ${alreadyEnrolled ? "is-disabled" : ""}">
+                            <input
+                              ${alreadyEnrolled ? "checked disabled" : ""}
+                              name="childIds"
+                              type="checkbox"
+                              value="${escapeHtml(child.id)}"
+                            />
+                            <span>${escapeHtml(`${child.firstName} ${child.lastName}`.trim())}${alreadyEnrolled ? " - already enrolled" : ""}</span>
+                          </label>
+                        `;
+                      }).join("")
+                    : `<p class="context-note">Add a child before enrolling in a class.</p>`
+                }
+              </div>
+            </fieldset>
+          </section>
 
-        <fieldset class="checkbox-field">
-          <legend>Optional fees</legend>
-          <div class="checkbox-grid two-column-checkbox-grid">
-            ${
-              loadingPricing
-                ? `<p class="context-note">Loading fees...</p>`
-                : optionalFees.length
-                  ? optionalFees.map((item) => `
-                    <label class="checkbox-option">
-                      <input name="optionalFeeItemIds" type="checkbox" value="${escapeHtml(item.id)}" />
-                      <span>${escapeHtml(item.name)} - ${formatMoney(item.fee, item.currency)}</span>
-                    </label>
-                  `).join("")
-                  : `<p class="context-note">No optional fees are configured for this class.</p>`
-            }
-          </div>
-        </fieldset>
+          <section data-enrollment-wizard-step="2" hidden>
+            <section class="enrollment-summary">
+              <div>
+                <strong>Required fees</strong>
+                ${
+                  loadingPricing
+                    ? `<span>Loading fees...</span>`
+                    : requiredFees.length
+                      ? requiredFees.map((item) => `<span>${escapeHtml(item.name)}: ${formatMoney(item.fee, item.currency)}</span>`).join("")
+                      : "<span>None</span>"
+                }
+              </div>
+              <div>
+                <strong>Status after submit</strong>
+                <span>${requiredFeeTotal > 0 ? "Pending payment" : "Enrolled"}</span>
+              </div>
+            </section>
 
-        <div class="operation-actions">
-          <button ${!selectableChildren.length || allChildrenEnrolled ? "disabled" : ""} type="submit">Enroll selected</button>
-          <button class="secondary-button" data-enrollment-cancel type="button">Cancel</button>
+            <fieldset class="checkbox-field">
+              <legend>Optional fees</legend>
+              <div class="checkbox-grid two-column-checkbox-grid">
+                ${
+                  loadingPricing
+                    ? `<p class="context-note">Loading fees...</p>`
+                    : optionalFees.length
+                      ? optionalFees.map((item) => `
+                        <label class="checkbox-option">
+                          <input
+                            data-enrollment-fee-amount="${escapeHtml(item.fee || 0)}"
+                            data-enrollment-fee-checkbox
+                            data-enrollment-fee-currency="${escapeHtml(item.currency || "USD")}"
+                            data-enrollment-fee-name="${escapeHtml(item.name)}"
+                            name="optionalFeeItemIds"
+                            type="checkbox"
+                            value="${escapeHtml(item.id)}"
+                          />
+                          <span>${escapeHtml(item.name)} - ${formatMoney(item.fee, item.currency)}</span>
+                        </label>
+                      `).join("")
+                      : `<p class="context-note">No optional fees are configured for this class.</p>`
+                }
+              </div>
+            </fieldset>
+
+            <fieldset class="checkbox-field" data-enrollment-payment-methods ${requiredFeeTotal > 0 ? "" : "hidden"}>
+              <legend>Payment</legend>
+              <div class="checkbox-grid two-column-checkbox-grid">
+                <label class="checkbox-option">
+                  <input ${requiredFeeTotal > 0 ? "checked" : ""} name="paymentPreference" type="radio" value="online" />
+                  <span>Pay online</span>
+                </label>
+                <label class="checkbox-option">
+                  <input ${requiredFeeTotal > 0 ? "" : "checked"} name="paymentPreference" type="radio" value="skip" />
+                  <span>Skip payment for now</span>
+                </label>
+              </div>
+            </fieldset>
+          </section>
+
+          <section data-enrollment-wizard-step="3" hidden>
+            <section class="enrollment-summary">
+              <div>
+                <strong>Class</strong>
+                <span>${escapeHtml(classRecord ? classRecord.name : "Class")}</span>
+                <span>${escapeHtml(classRecord ? classScheduleSummary(classRecord) : "")}</span>
+              </div>
+              <div>
+                <strong>Required fees</strong>
+                <span>${escapeHtml(formatMoney(requiredFeeTotal, requiredFees[0]?.currency || "USD"))}</span>
+                <span>${escapeHtml(requiredFeeTotal > 0 ? "Payment can be completed online or later from Payments." : "No required payment.")}</span>
+              </div>
+              <div>
+                <strong>Optional fees</strong>
+                <span data-enrollment-review-optional>None</span>
+              </div>
+              <div>
+                <strong>Total due</strong>
+                <span data-enrollment-review-total>${escapeHtml(formatMoney(requiredFeeTotal, requiredFees[0]?.currency || "USD"))}</span>
+              </div>
+              <div>
+                <strong>Payment</strong>
+                <span data-enrollment-review-payment>${requiredFeeTotal > 0 ? "Pay online" : "No payment selected"}</span>
+              </div>
+            </section>
+          </section>
+
+          <div class="wizard-actions">
+            <button class="secondary-button compact-button" data-enrollment-wizard-back disabled type="button">Back</button>
+            <button class="secondary-button compact-button" data-enrollment-wizard-next ${!selectableChildren.length || allChildrenEnrolled ? "disabled" : ""} type="button">Next</button>
+            <button ${!selectableChildren.length || allChildrenEnrolled ? "disabled" : ""} hidden type="submit">Enroll selected</button>
+            <button class="secondary-button" data-enrollment-cancel type="button">Cancel</button>
+          </div>
         </div>
       </form>
     </div>
@@ -2127,6 +2480,13 @@ function formatMoney(cents, currency = "USD") {
     style: "currency",
     currency: currency || "USD",
   }).format(Number(cents || 0) / 100);
+}
+
+function localDateValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function operationTitle(action) {
@@ -2241,6 +2601,10 @@ function isCreateChildOperation(action) {
 function isEditChildOperation(action) {
   const normalized = action.toLowerCase();
   return normalized.includes("child") && normalized.includes("edit");
+}
+
+function parentAttendanceOperation(section, action) {
+  return section.id === "attendance" && action && action.toLowerCase() === "check in child";
 }
 
 function notificationComposePanel(classes = []) {
@@ -3303,6 +3667,103 @@ function initializeNotificationWizard(root) {
     goToStep(currentStep() + 1);
   });
   backButton?.addEventListener("click", () => goToStep(currentStep() - 1));
+  sync();
+}
+
+function initializeEnrollmentWizard(root) {
+  const form = root.querySelector("[data-enrollment-form]");
+  const stepInput = form?.querySelector("[data-enrollment-step-value]");
+  if (!form || !stepInput) {
+    return;
+  }
+  const submitButton = form.querySelector('button[type="submit"]');
+  const backButton = form.querySelector("[data-enrollment-wizard-back]");
+  const nextButton = form.querySelector("[data-enrollment-wizard-next]");
+  const paymentMethods = form.querySelector("[data-enrollment-payment-methods]");
+  const paymentInputs = Array.from(paymentMethods?.querySelectorAll("input") || []);
+  const feeInputs = Array.from(form.querySelectorAll("[data-enrollment-fee-checkbox]"));
+  const hasRequiredFees = paymentMethods && !paymentMethods.hasAttribute("hidden");
+  const reviewOptional = form.querySelector("[data-enrollment-review-optional]");
+  const reviewTotal = form.querySelector("[data-enrollment-review-total]");
+  const reviewPayment = form.querySelector("[data-enrollment-review-payment]");
+  const requiredFeeTotal = Number(form.dataset.requiredFeeTotal || 0);
+  const requiredFeeCurrency = form.dataset.requiredFeeCurrency || "USD";
+
+  const currentStep = () => Number(stepInput.value || 1);
+  const stepSection = (step) => form.querySelector(`[data-enrollment-wizard-step="${step}"]`);
+  const selectedOptionalFees = () => feeInputs
+    .filter((input) => input.checked)
+    .map((input) => ({
+      amount: Number(input.dataset.enrollmentFeeAmount || 0),
+      currency: input.dataset.enrollmentFeeCurrency || requiredFeeCurrency,
+      name: input.dataset.enrollmentFeeName || "Optional fee",
+    }));
+  const syncReview = () => {
+    const selectedFees = selectedOptionalFees();
+    if (reviewOptional) {
+      reviewOptional.textContent = selectedFees.length
+        ? selectedFees.map((fee) => `${fee.name}: ${formatMoney(fee.amount, fee.currency)}`).join(", ")
+        : "None";
+    }
+    if (reviewTotal) {
+      const total = requiredFeeTotal + selectedFees.reduce((sum, fee) => sum + fee.amount, 0);
+      reviewTotal.textContent = formatMoney(total, selectedFees[0]?.currency || requiredFeeCurrency);
+    }
+    if (reviewPayment) {
+      const selectedPayment = paymentInputs.find((input) => input.checked);
+      reviewPayment.textContent = paymentMethods?.hidden
+        ? "No payment selected"
+        : selectedPayment?.value === "online"
+          ? "Pay online"
+          : "Skip payment for now";
+    }
+  };
+  const syncPaymentMethods = () => {
+    if (!paymentMethods) {
+      return;
+    }
+    const hasSelectedFee = hasRequiredFees || feeInputs.some((input) => input.checked);
+    paymentMethods.hidden = !hasSelectedFee;
+    paymentInputs.forEach((input) => {
+      input.disabled = !hasSelectedFee;
+    });
+    syncReview();
+  };
+  const sync = () => {
+    const step = currentStep();
+    form.querySelectorAll("[data-enrollment-wizard-step]").forEach((section) => {
+      section.hidden = Number(section.dataset.enrollmentWizardStep) !== step;
+    });
+    form.querySelectorAll("[data-enrollment-wizard-indicator]").forEach((indicator) => {
+      const indicatorStep = Number(indicator.dataset.enrollmentWizardIndicator);
+      indicator.classList.toggle("is-active", indicatorStep === step);
+      indicator.classList.toggle("is-complete", indicatorStep < step);
+    });
+    backButton.disabled = step === 1;
+    nextButton.hidden = step === 3;
+    if (submitButton) {
+      submitButton.hidden = step !== 3;
+    }
+    syncPaymentMethods();
+    syncReview();
+  };
+  const goToStep = (step) => {
+    stepInput.value = String(Math.max(1, Math.min(3, step)));
+    sync();
+  };
+  nextButton?.addEventListener("click", () => {
+    const section = stepSection(currentStep());
+    if (section && !Array.from(section.querySelectorAll("input, textarea, select")).every((field) => field.reportValidity())) {
+      return;
+    }
+    if (currentStep() === 1 && !validateRequiredCheckboxGroups(section || form)) {
+      return;
+    }
+    goToStep(currentStep() + 1);
+  });
+  backButton?.addEventListener("click", () => goToStep(currentStep() - 1));
+  feeInputs.forEach((input) => input.addEventListener("change", syncPaymentMethods));
+  paymentInputs.forEach((input) => input.addEventListener("change", syncReview));
   sync();
 }
 
