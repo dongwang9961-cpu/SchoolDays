@@ -150,7 +150,7 @@ const parentSections = [
     label: "Children",
     title: "Children",
     summary: "Manage child profiles for this school.",
-    actions: ["Add child", "Edit child"],
+    actions: ["Add child"],
     rows: ["No child records loaded yet."],
   },
   {
@@ -325,7 +325,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                 <p>${escapeHtml(workspaceHint(activeSection))}</p>
                 ${activeSection.id === "sites" && siteQuota ? `<p class="context-note">${escapeHtml(siteQuotaText(siteQuota))}</p>` : ""}
               </div>
-              ${panelHeaderAction(activeSection)}
+              ${panelHeaderAction(activeSection, role)}
             </div>
 
             ${error ? `<p class="message error" role="alert">${escapeHtml(error)}</p>` : ""}
@@ -1933,7 +1933,10 @@ function toolbarFor(section) {
   `;
 }
 
-function panelHeaderAction(section) {
+function panelHeaderAction(section, role) {
+  if (role === "PARENT") {
+    return "";
+  }
   const addActions = {
     sites: "Add site",
     programs: "Add program",
