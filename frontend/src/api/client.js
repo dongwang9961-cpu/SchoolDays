@@ -7,6 +7,7 @@ export class ApiError extends Error {
 }
 
 const apiBaseUrl = resolveApiBaseUrl();
+let redirectingToLogin = false;
 
 export async function apiGet(path, options = {}) {
   const response = await fetch(apiUrl(path), {
@@ -14,11 +15,7 @@ export async function apiGet(path, options = {}) {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => undefined);
-    if (payload && typeof payload.error === "string") {
-      throw new ApiError(payload.error, response.status);
-    }
-    throw new ApiError(`Request failed with ${response.status}`, response.status);
+    await handleFailedResponse(response, options);
   }
 
   if (response.status === 204) {
@@ -36,11 +33,7 @@ export async function apiPost(path, body, options = {}) {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => undefined);
-    if (payload && typeof payload.error === "string") {
-      throw new ApiError(payload.error, response.status);
-    }
-    throw new ApiError(`Request failed with ${response.status}`, response.status);
+    await handleFailedResponse(response, options);
   }
 
   if (response.status === 204) {
@@ -58,14 +51,32 @@ export async function apiPatch(path, body, options = {}) {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => undefined);
-    if (payload && typeof payload.error === "string") {
-      throw new ApiError(payload.error, response.status);
-    }
-    throw new ApiError(`Request failed with ${response.status}`, response.status);
+    await handleFailedResponse(response, options);
   }
 
   return response.json();
+}
+
+async function handleFailedResponse(response, options = {}) {
+  const payload = await response.json().catch(() => undefined);
+  const message = payload && typeof payload.error === "string"
+    ? payload.error
+    : `Request failed with ${response.status}`;
+
+  if (response.status === 401 && options.auth !== false) {
+    redirectToLogin();
+  }
+
+  throw new ApiError(message, response.status);
+}
+
+function redirectToLogin() {
+  if (redirectingToLogin) {
+    return;
+  }
+  redirectingToLogin = true;
+  localStorage.removeItem("schooldays.accessToken");
+  window.location.replace(window.location.pathname);
 }
 
 function apiUrl(path) {
