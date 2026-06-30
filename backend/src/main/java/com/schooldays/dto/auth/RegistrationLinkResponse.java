@@ -7,8 +7,6 @@ public record RegistrationLinkResponse(
         UUID tenantId,
         String email,
         String intendedRole,
-        String token,
-        String link,
         OffsetDateTime expiresAt
 ) {
 }

@@ -10,6 +10,7 @@ import com.schooldays.dto.notification.NotificationProviderListResponse;
 import com.schooldays.dto.notification.SendNotificationRequest;
 import com.schooldays.service.notification.NotificationService;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +31,7 @@ public class NotificationController {
     }
 
     @GetMapping("/notification-providers")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
     public NotificationProviderListResponse listNotificationProviders(
             @PathVariable("tenantId") UUID tenantId,
             Authentication authentication
@@ -38,6 +40,7 @@ public class NotificationController {
     }
 
     @PostMapping("/notification-providers/gmail/start")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
     public GmailConnectStartResponse startGmailConnection(
             @PathVariable("tenantId") UUID tenantId,
             Authentication authentication,
@@ -47,6 +50,7 @@ public class NotificationController {
     }
 
     @PostMapping("/notifications")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
     public NotificationHistoryResponse sendNotification(
             @PathVariable("tenantId") UUID tenantId,
             Authentication authentication,
@@ -56,6 +60,7 @@ public class NotificationController {
     }
 
     @GetMapping("/notification-history")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
     public NotificationHistoryListResponse listNotificationHistory(
             @PathVariable("tenantId") UUID tenantId,
             Authentication authentication

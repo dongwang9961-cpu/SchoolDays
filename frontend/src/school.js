@@ -1,7 +1,7 @@
 import { contextError, contextNote, escapeHtml, renderAuthPage } from "./authPage.js";
 import { ApiError } from "./api/client.js";
 import { getPublicSchool } from "./api/schools.js";
-import { bestSchoolRole, renderSchoolDashboard } from "./schoolAdminDashboard.js";
+import { renderSchoolDashboard } from "./schoolAdminDashboard.js";
 import "./styles.css";
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -142,7 +142,7 @@ function schoolLookupErrorText() {
 }
 
 function handleAuthenticated(response) {
-  const role = school ? bestSchoolRole(response.user, school.tenantId) : "";
+  const role = school ? schoolPortalRole(response.user, school.tenantId) : "";
   if (role) {
     renderSchoolDashboard({
       role,
@@ -150,7 +150,7 @@ function handleAuthenticated(response) {
       user: response.user,
       onLogout: () => {
         localStorage.removeItem("schooldays.accessToken");
-        window.location.reload();
+        returnToLoginPage();
       },
     });
     return;
@@ -171,6 +171,29 @@ function handleAuthenticated(response) {
 
   document.querySelector("[data-return-login]").addEventListener("click", () => {
     localStorage.removeItem("schooldays.accessToken");
-    window.location.reload();
+    returnToLoginPage();
   });
+}
+
+function returnToLoginPage() {
+  window.location.replace(window.location.pathname);
+}
+
+function schoolPortalRole(user, tenantId) {
+  if (schoolRoute.portal === "admin") {
+    return hasSchoolRole(user, tenantId, "SCHOOL_ADMIN") ? "SCHOOL_ADMIN" : "";
+  }
+  if (schoolRoute.portal === "teacher") {
+    return hasSchoolRole(user, tenantId, "TEACHER") ? "TEACHER" : "";
+  }
+  if (hasSchoolRole(user, tenantId, "PARENT")) {
+    return "PARENT";
+  }
+  return "";
+}
+
+function hasSchoolRole(user, tenantId, role) {
+  return (user.tenantRoles || []).some(
+    (tenantRole) => tenantRole.tenantId === tenantId && tenantRole.role === role
+  );
 }

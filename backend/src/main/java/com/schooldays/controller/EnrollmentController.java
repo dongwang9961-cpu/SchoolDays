@@ -7,6 +7,7 @@ import com.schooldays.dto.api.EndpointStatusResponse;
 import com.schooldays.dto.pricing.ClassPricingResponse;
 import com.schooldays.service.pricing.ClassPricingService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,11 +25,13 @@ public class EnrollmentController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/api/parents/me/enrollments")
+    @PreAuthorize("hasRole('PARENT')")
     public ResponseEntity<EndpointStatusResponse> listParentEnrollments() {
         return notImplemented("GET /api/parents/me/enrollments");
     }
 
     @PostMapping("/api/enrollments")
+    @PreAuthorize("hasRole('PARENT')")
     public ResponseEntity<EndpointStatusResponse> createEnrollment(
             @RequestBody(required = false) Map<String, Object> request
     ) {

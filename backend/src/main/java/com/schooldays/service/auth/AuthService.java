@@ -27,6 +27,8 @@ import com.schooldays.entities.auth.GoogleOAuthState;
 import com.schooldays.entities.auth.RegistrationLinkRow;
 import com.schooldays.entities.auth.TeacherInvitationRow;
 import com.schooldays.entities.auth.TenantInvitationRow;
+import com.schooldays.service.email.SystemEmailMessage;
+import com.schooldays.service.email.SystemEmailService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
@@ -61,8 +63,10 @@ public class AuthService {
     private final RoleDao roleDao;
     private final SecureTokenGenerator tokenGenerator;
     private final GoogleOAuthStateService googleOAuthStateService;
+    private final SystemEmailService systemEmailService;
     private final RestClient restClient;
     private final String publicBaseUrl;
+    private final String systemEmailFromEmail;
     private final String googleClientId;
     private final String googleClientSecret;
     private final String googleRedirectUri;
@@ -83,7 +87,9 @@ public class AuthService {
             RoleDao roleDao,
             SecureTokenGenerator tokenGenerator,
             GoogleOAuthStateService googleOAuthStateService,
+            SystemEmailService systemEmailService,
             @Value("${schooldays.public-base-url:http://localhost:8080}") String publicBaseUrl,
+            @Value("${schooldays.system-email.from-email:noreply@schooldays.cc}") String systemEmailFromEmail,
             @Value("${schooldays.security.google.client-id:}") String googleClientId,
             @Value("${schooldays.security.google.client-secret:}") String googleClientSecret,
             @Value("${schooldays.security.google.redirect-uri:http://localhost:8080/api/auth/google/callback}") String googleRedirectUri,
@@ -103,8 +109,10 @@ public class AuthService {
         this.roleDao = roleDao;
         this.tokenGenerator = tokenGenerator;
         this.googleOAuthStateService = googleOAuthStateService;
+        this.systemEmailService = systemEmailService;
         this.restClient = RestClient.create();
         this.publicBaseUrl = publicBaseUrl;
+        this.systemEmailFromEmail = systemEmailFromEmail;
         this.googleClientId = googleClientId;
         this.googleClientSecret = googleClientSecret;
         this.googleRedirectUri = googleRedirectUri;
@@ -297,14 +305,46 @@ public class AuthService {
                 expiresAt,
                 now
         );
-        return new RegistrationLinkResponse(
+        String completionLink = registrationCompletionLink(link.tenantId(), token);
+        RegistrationLinkResponse response = new RegistrationLinkResponse(
                 link.tenantId(),
                 link.email(),
                 link.intendedRole(),
-                token,
-                registrationCompletionLink(link.tenantId(), token),
                 expiresAt
         );
+        sendRegistrationLinkEmail(response, completionLink);
+        return response;
+    }
+
+    private void sendRegistrationLinkEmail(RegistrationLinkResponse response, String completionLink) {
+        tenantDao.findActivePublicSchoolById(response.tenantId())
+                .ifPresent(school -> {
+                    String subject = "Complete your " + school.name() + " registration";
+                    String textBody = """
+                            Hello,
+
+                            Use this secure link to complete your SchoolDays registration for %s:
+
+                            %s
+
+                            This link expires at %s.
+                            """.formatted(school.name(), completionLink, response.expiresAt());
+                    String htmlBody = """
+                            <p>Hello,</p>
+                            <p>Use this secure link to complete your SchoolDays registration for %s:</p>
+                            <p><a href="%s">Complete registration</a></p>
+                            <p>This link expires at %s.</p>
+                            """.formatted(escapeHtml(school.name()), escapeHtml(completionLink), response.expiresAt());
+
+                    systemEmailService.send(new SystemEmailMessage(
+                            response.email(),
+                            systemEmailFromEmail,
+                            school.name(),
+                            subject,
+                            textBody,
+                            htmlBody
+                    ));
+                });
     }
 
     private String registrationCompletionLink(UUID tenantId, String token) {
@@ -341,6 +381,16 @@ public class AuthService {
 
     private String urlEncode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String escapeHtml(String value) {
+        return value == null
+                ? ""
+                : value
+                        .replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                        .replace("\"", "&quot;");
     }
 
     private Map<String, Object> exchangeGoogleAuthorizationCode(String code) {

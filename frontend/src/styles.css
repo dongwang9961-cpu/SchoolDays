@@ -670,6 +670,14 @@ button:disabled {
   padding: 18px;
 }
 
+.notification-modal-panel {
+  background: #ffffff;
+  max-height: min(760px, calc(100vh - 48px));
+  max-width: 760px;
+  overflow: auto;
+  width: min(100%, 760px);
+}
+
 .operation-grid {
   display: grid;
   gap: 14px;

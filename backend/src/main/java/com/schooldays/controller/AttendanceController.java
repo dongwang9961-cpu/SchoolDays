@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.schooldays.dto.api.EndpointStatusResponse;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AttendanceController extends ApiPlaceholderSupport {
 
     @PostMapping("/api/attendance/check-in")
+    @PreAuthorize("hasAnyRole('PARENT', 'TEACHER', 'SCHOOL_ADMIN')")
     public ResponseEntity<EndpointStatusResponse> checkIn(
             @RequestBody(required = false) Map<String, Object> request
     ) {
@@ -24,6 +26,7 @@ public class AttendanceController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/api/classes/{classId}/attendance")
+    @PreAuthorize("hasAnyRole('TEACHER', 'SCHOOL_ADMIN')")
     public ResponseEntity<EndpointStatusResponse> getClassAttendance(
             @PathVariable("classId") UUID classId,
             @RequestParam LocalDate date

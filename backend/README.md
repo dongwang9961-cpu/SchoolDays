@@ -49,6 +49,8 @@ Content-Type: application/json
 }
 ```
 
+This endpoint sends the link by system email and does not return the raw token or completion URL in the API response.
+
 Create a self-service registration link. Public self-service is intentionally limited to parent accounts; teachers and school administrators must use invitation acceptance endpoints.
 
 ```http
@@ -61,6 +63,8 @@ Content-Type: application/json
   "intendedRole": "PARENT"
 }
 ```
+
+This endpoint also sends the link by system email and does not return the raw token or completion URL in the API response.
 
 Complete an invited/self-assisted registration:
 

@@ -183,14 +183,6 @@ const parentSections = [
     actions: ["Check in child", "View attendance"],
     rows: ["No attendance records loaded yet."],
   },
-  {
-    id: "notifications",
-    label: "Notifications",
-    title: "Notifications",
-    summary: "Review email messages sent by the school.",
-    actions: ["View message history"],
-    rows: ["No notification history loaded yet."],
-  },
 ];
 
 const roleDashboards = {
@@ -272,6 +264,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     const rows = rowsFor(activeSection);
     const currentSite = selectedSite();
     const title = role === "SCHOOL_ADMIN" && adminMode === "site" && currentSite ? currentSite.name : dashboard.label;
+    const notificationModalOpen = activeOperation && isNotificationOperation(activeOperation);
 
     root.innerHTML = `
       <main class="app-shell">
@@ -322,10 +315,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             </div>
 
             ${error ? `<p class="message error" role="alert">${escapeHtml(error)}</p>` : ""}
-            ${activeOperation ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
+            ${activeOperation && !notificationModalOpen ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
 
             ${dataList(activeSection, rows)}
           </section>
+          ${notificationModalOpen ? notificationModal(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
           ${profileOpen ? profilePanel(profile, user, loadingProfile) : ""}
           ${noticeToast(notice)}
         </section>
@@ -470,6 +464,14 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       notice = "";
       error = "";
       render();
+    });
+    root.querySelector("[data-notification-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        activeOperation = "";
+        notice = "";
+        error = "";
+        render();
+      }
     });
 
     root.querySelector("[data-operation-form]")?.addEventListener("submit", async (event) => {
@@ -1670,7 +1672,7 @@ function operationPanel(
   const pricingOperation = isPricingOperation(action);
   const notificationOperation = isNotificationOperation(action);
   return `
-    <form class="operation-panel" data-dirty-form data-operation-form>
+    <form class="operation-panel${notificationOperation ? " notification-modal-panel" : ""}" data-dirty-form data-operation-form>
       <div class="workspace-heading">
         <h3>${escapeHtml(operationTitle(action))}</h3>
         <p>${escapeHtml(operationDescription(section, action))}</p>
@@ -1698,6 +1700,26 @@ function operationPanel(
         <button class="secondary-button" data-operation-cancel type="button">Cancel</button>
       </div>
     </form>
+  `;
+}
+
+function notificationModal(
+  section,
+  action,
+  selectedSite,
+  selectedProgram,
+  selectedClass,
+  selectedPricing,
+  user,
+  sites = [],
+  programs = [],
+  classes = [],
+  loadingPricing = false
+) {
+  return `
+    <div class="modal-backdrop" data-notification-modal>
+      ${operationPanel(section, action, selectedSite, selectedProgram, selectedClass, selectedPricing, user, sites, programs, classes, loadingPricing)}
+    </div>
   `;
 }
 

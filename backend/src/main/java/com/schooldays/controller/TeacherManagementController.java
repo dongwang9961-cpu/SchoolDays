@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import com.schooldays.dto.api.EndpointStatusResponse;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class TeacherManagementController extends ApiPlaceholderSupport {
 
     @PostMapping("/classes/{classId}/teachers/invite")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
     public ResponseEntity<EndpointStatusResponse> inviteTeacher(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,
@@ -27,11 +29,13 @@ public class TeacherManagementController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/teacher-invitations")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
     public ResponseEntity<EndpointStatusResponse> listTeacherInvitations(@PathVariable("tenantId") UUID tenantId) {
         return notImplemented("GET /api/tenants/{tenantId}/teacher-invitations");
     }
 
     @PostMapping("/classes/{classId}/teachers")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
     public ResponseEntity<EndpointStatusResponse> assignTeacher(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,
@@ -41,6 +45,7 @@ public class TeacherManagementController extends ApiPlaceholderSupport {
     }
 
     @DeleteMapping("/classes/{classId}/teachers/{teacherUserId}")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
     public ResponseEntity<EndpointStatusResponse> removeTeacher(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,

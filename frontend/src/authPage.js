@@ -46,9 +46,9 @@ export function renderAuthPage({
 
           ${loginForm()}
           ${parentRegisterForm()}
-          ${completeRegistrationForm()}
-          ${teacherInvitationForm()}
-          ${schoolInvitationForm()}
+          ${completeRegistrationForm(Boolean(initialToken))}
+          ${teacherInvitationForm(Boolean(initialToken))}
+          ${schoolInvitationForm(Boolean(initialToken))}
         </section>
       </section>
     </main>
@@ -202,13 +202,13 @@ function loginForm() {
       </div>
 
       <label>
-        <span>Email</span>
-        <input autocomplete="email" name="email" placeholder="parent@example.com" required type="email" />
+        <span>Email <span class="required-marker" aria-label="required">*</span></span>
+        <input autocomplete="email" maxlength="320" name="email" placeholder="parent@example.com" required type="email" />
       </label>
 
       <label>
-        <span>Password</span>
-        <input autocomplete="current-password" minlength="8" name="password" placeholder="At least 8 characters" required type="password" />
+        <span>Password <span class="required-marker" aria-label="required">*</span></span>
+        <input autocomplete="current-password" maxlength="128" minlength="8" name="password" placeholder="At least 8 characters" required type="password" />
       </label>
 
       <p class="message error" data-error hidden role="alert"></p>
@@ -232,8 +232,8 @@ function parentRegisterForm() {
       <div class="form-divider"><span>or</span></div>
 
       <label>
-        <span>Email</span>
-        <input autocomplete="email" name="email" placeholder="parent@example.com" required type="email" />
+        <span>Email <span class="required-marker" aria-label="required">*</span></span>
+        <input autocomplete="email" maxlength="320" name="email" placeholder="parent@example.com" required type="email" />
       </label>
 
       <p class="message error" data-error hidden role="alert"></p>
@@ -244,33 +244,33 @@ function parentRegisterForm() {
   `;
 }
 
-function completeRegistrationForm() {
+function completeRegistrationForm(hasEmailLinkToken = false) {
   return `
     <form class="auth-form" data-auth-form="complete" hidden>
       <div class="form-heading">
         <h2>Complete registration</h2>
-        <p>Use the secure token from your email link to finish your account.</p>
+        <p>${hasEmailLinkToken ? "Create your account from the secure email link." : "Use the secure token from your email link to finish your account."}</p>
       </div>
 
-      ${registrationFields("Create account")}
+      ${registrationFields("Create account", { hasEmailLinkToken })}
     </form>
   `;
 }
 
-function teacherInvitationForm() {
+function teacherInvitationForm(hasEmailLinkToken = false) {
   return `
     <form class="auth-form" data-auth-form="teacher" hidden>
       <div class="form-heading">
         <h2>Accept teacher invitation</h2>
-        <p>Use the invitation token sent to your teacher email.</p>
+        <p>${hasEmailLinkToken ? "Create your teacher account from the secure invitation link." : "Use the invitation token sent to your teacher email."}</p>
       </div>
 
-      ${registrationFields("Join as teacher")}
+      ${registrationFields("Join as teacher", { hasEmailLinkToken })}
     </form>
   `;
 }
 
-function schoolInvitationForm() {
+function schoolInvitationForm(hasEmailLinkToken = false) {
   return `
     <form class="auth-form" data-auth-form="school" hidden>
       <div class="form-heading">
@@ -278,43 +278,51 @@ function schoolInvitationForm() {
         <p>Create the initial school administrator account from the platform invitation.</p>
       </div>
 
-      ${registrationFields("Create school admin")}
+      ${registrationFields("Create school admin", { hasEmailLinkToken })}
     </form>
   `;
 }
 
-function registrationFields(buttonText) {
+function registrationFields(buttonText, { hasEmailLinkToken = false } = {}) {
   return `
-    <label>
-      <span>Token</span>
-      <input name="token" placeholder="Paste email token" required type="text" />
-    </label>
+    ${hasEmailLinkToken
+      ? `<input name="token" required type="hidden" />`
+      : `
+        <label>
+          <span>Token <span class="required-marker" aria-label="required">*</span></span>
+          <input maxlength="200" name="token" placeholder="Paste email token" required type="text" />
+        </label>
+      `}
 
     <div class="field-grid">
       <label>
-        <span>First name</span>
-        <input autocomplete="given-name" name="firstName" required type="text" />
+        <span>First name <span class="required-marker" aria-label="required">*</span></span>
+        <input autocomplete="given-name" maxlength="100" name="firstName" required type="text" />
       </label>
 
       <label>
-        <span>Last name</span>
-        <input autocomplete="family-name" name="lastName" required type="text" />
+        <span>Last name <span class="required-marker" aria-label="required">*</span></span>
+        <input autocomplete="family-name" maxlength="100" name="lastName" required type="text" />
       </label>
     </div>
 
+    ${hasEmailLinkToken
+      ? ""
+      : `
+        <label>
+          <span>Email</span>
+          <input autocomplete="email" maxlength="320" name="email" placeholder="parent@example.com" type="email" />
+        </label>
+      `}
+
     <label>
-      <span>Email</span>
-      <input autocomplete="email" name="email" placeholder="parent@example.com" type="email" />
+      <span>Phone <span class="required-marker" aria-label="required">*</span></span>
+      <input autocomplete="tel" maxlength="50" name="phone" placeholder="555-0100" required type="tel" />
     </label>
 
     <label>
-      <span>Phone</span>
-      <input autocomplete="tel" name="phone" placeholder="555-0100" required type="tel" />
-    </label>
-
-    <label>
-      <span>Password</span>
-      <input autocomplete="new-password" minlength="8" name="password" required type="password" />
+      <span>Password <span class="required-marker" aria-label="required">*</span></span>
+      <input autocomplete="new-password" maxlength="128" minlength="8" name="password" required type="password" />
     </label>
 
     <p class="message error" data-error hidden role="alert"></p>
@@ -370,8 +378,5 @@ function successText(mode, user) {
 }
 
 function registrationLinkSuccessText(response) {
-  if (response.link) {
-    return `Registration link created for ${response.email}. Open ${response.link} to finish registration.`;
-  }
-  return `Registration link sent to ${response.email}.`;
+  return `Registration link sent to ${response.email}. Please check your email to finish registration.`;
 }
