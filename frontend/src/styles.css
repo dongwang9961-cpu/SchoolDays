@@ -116,6 +116,17 @@ h1 {
   margin-bottom: 6px;
 }
 
+.compact-heading {
+  border-top: 1px solid #d8deeb;
+  margin: 4px 0 -4px;
+  padding-top: 14px;
+}
+
+.compact-heading h3 {
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+
 h2 {
   font-size: 1.55rem;
   line-height: 1.2;
@@ -676,6 +687,42 @@ button:disabled {
   max-width: 760px;
   overflow: auto;
   width: min(100%, 760px);
+}
+
+.enrollment-modal-panel {
+  background: #ffffff;
+  max-height: min(760px, calc(100vh - 48px));
+  max-width: 820px;
+  overflow: auto;
+  width: min(100%, 820px);
+}
+
+.enrollment-summary {
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
+}
+
+.enrollment-summary div {
+  display: grid;
+  gap: 6px;
+}
+
+.enrollment-summary strong {
+  color: #1d283a;
+}
+
+.two-column-checkbox-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.checkbox-option.is-disabled {
+  background: #f3f6fb;
+  color: #66758d;
+  cursor: default;
 }
 
 .operation-grid {

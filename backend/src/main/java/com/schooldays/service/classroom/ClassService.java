@@ -49,6 +49,15 @@ public class ClassService {
         return new ClassListResponse(classes);
     }
 
+    public ClassListResponse listAvailableClasses(UUID tenantId) {
+        requireTenant(tenantId);
+        List<ClassResponse> classes = classDao.findActiveByTenant(tenantId)
+                .stream()
+                .map(ClassResponse::from)
+                .toList();
+        return new ClassListResponse(classes);
+    }
+
     public ClassResponse createClass(UUID tenantId, CreateClassRequest request) {
         requireTenant(tenantId);
         requireProgram(tenantId, request.programId());

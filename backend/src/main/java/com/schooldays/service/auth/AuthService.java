@@ -7,6 +7,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.schooldays.dao.auth.RegistrationLinkDao;
 import com.schooldays.dao.auth.RoleDao;
 import com.schooldays.dao.auth.TeacherInvitationDao;
@@ -49,6 +52,7 @@ public class AuthService {
 
     private static final Set<String> SELF_SERVICE_ROLES = Set.of("PARENT");
     private static final long REGISTRATION_LINK_TTL_HOURS = 48;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
@@ -161,6 +165,10 @@ public class AuthService {
                 && !email.equals(EmailNormalizer.normalize(request.email()))) {
             throw new InvalidAuthRequestException("Registration link does not match the submitted email");
         }
+        String metadataJson = null;
+        if ("PARENT".equals(link.intendedRole())) {
+            metadataJson = parentMetadataJson(request.address());
+        }
 
         UUID userId = userDao.createOrUpdatePasswordUser(
                 email,
@@ -168,6 +176,7 @@ public class AuthService {
                 request.firstName(),
                 request.lastName(),
                 request.phone(),
+                metadataJson,
                 now
         );
         roleDao.assignRole(userId, link.tenantId(), link.intendedRole());
@@ -366,6 +375,30 @@ public class AuthService {
                 request.phone(),
                 now
         );
+    }
+
+    private String parentMetadataJson(CompleteRegistrationRequest.ParentAddress address) {
+        if (address == null) {
+            throw new InvalidAuthRequestException("Address is required for parent registration");
+        }
+        ObjectNode root = OBJECT_MAPPER.createObjectNode();
+        ObjectNode addressNode = root.putObject("address");
+        put(addressNode, "streetAddress", address.streetAddress());
+        put(addressNode, "suite", address.suite());
+        put(addressNode, "city", address.city());
+        put(addressNode, "state", address.state());
+        put(addressNode, "zipCode", address.zipCode());
+        try {
+            return OBJECT_MAPPER.writeValueAsString(root);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Unable to serialize parent address", exception);
+        }
+    }
+
+    private void put(ObjectNode node, String field, String value) {
+        if (value != null && !value.isBlank()) {
+            node.put(field, value.trim());
+        }
     }
 
     private void assertSubmittedEmailMatches(String submittedEmail, String expectedEmail, String message) {

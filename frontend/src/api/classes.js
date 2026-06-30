@@ -5,6 +5,11 @@ export function listClasses(tenantId, siteId) {
   return apiGet(`/api/tenants/${tenantId}/classes?${params.toString()}`);
 }
 
+export function listAvailableClasses(tenantId) {
+  const params = new URLSearchParams({ tenantId });
+  return apiGet(`/api/parents/me/classes?${params.toString()}`);
+}
+
 export function createClass(tenantId, request) {
   return apiPost(`/api/tenants/${tenantId}/classes`, request);
 }

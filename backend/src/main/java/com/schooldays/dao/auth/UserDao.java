@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.schooldays.entities.auth.UserAuthRow;
 import com.schooldays.jooq.generated.tables.records.UsersRecord;
+import org.jooq.JSONB;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -39,6 +40,18 @@ public class UserDao {
             String phone,
             OffsetDateTime now
     ) {
+        return createOrUpdatePasswordUser(email, passwordHash, firstName, lastName, phone, null, now);
+    }
+
+    public UUID createOrUpdatePasswordUser(
+            String email,
+            String passwordHash,
+            String firstName,
+            String lastName,
+            String phone,
+            String metadataJson,
+            OffsetDateTime now
+    ) {
         Optional<UUID> existingUserId = userRepository.findByEmail(email)
                 .map(UsersRecord::getId);
 
@@ -50,6 +63,9 @@ public class UserDao {
                 .setPhone(phone)
                 .setStatus("active")
                 .setUpdatedAt(now);
+        if (metadataJson != null) {
+            record.setMetadata(JSONB.valueOf(metadataJson));
+        }
         existingUserId.ifPresent(record::setId);
         return userRepository.save(record).getId();
     }

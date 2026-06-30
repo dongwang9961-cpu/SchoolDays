@@ -1,7 +1,9 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
-import { createClass, listClasses, updateClass } from "./api/classes.js";
-import { getTenantClassPricing, saveClassPricing } from "./api/pricing.js";
+import { createChild, listChildren, updateChild } from "./api/children.js";
+import { createClass, listAvailableClasses, listClasses, updateClass } from "./api/classes.js";
+import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
+import { getClassPricing, getTenantClassPricing, saveClassPricing } from "./api/pricing.js";
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
 import { createSite, listSites, updateSite } from "./api/sites.js";
 import {
@@ -156,8 +158,8 @@ const parentSections = [
     label: "Classes",
     title: "Available Classes",
     summary: "Browse public classes and choose available dates.",
-    actions: ["Browse classes", "View available dates"],
-    rows: ["No class catalog loaded yet."],
+    actions: [],
+    rows: ["Class catalog is not loaded yet."],
   },
   {
     id: "enrollments",
@@ -229,6 +231,15 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let notificationProviders = [];
   let notificationHistory = [];
   let loadingNotifications = false;
+  let childRows = null;
+  let children = [];
+  let selectedChildId = "";
+  let loadingChildren = false;
+  let enrollments = [];
+  let loadingEnrollments = false;
+  let enrollmentModalOpen = false;
+  let enrollmentPricing = null;
+  let loadingEnrollmentPricing = false;
   let profileOpen = false;
   let profile = null;
   let loadingProfile = false;
@@ -236,6 +247,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
   if (role === "SCHOOL_ADMIN") {
     loadSites();
+  } else if (role === "PARENT") {
+    loadChildren();
+    loadEnrollments();
   }
 
   window.addEventListener("message", (event) => {
@@ -315,12 +329,13 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             </div>
 
             ${error ? `<p class="message error" role="alert">${escapeHtml(error)}</p>` : ""}
-            ${activeOperation && !notificationModalOpen ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
+            ${activeOperation && !notificationModalOpen ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedChild(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
 
             ${dataList(activeSection, rows)}
           </section>
-          ${notificationModalOpen ? notificationModal(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
+          ${notificationModalOpen ? notificationModal(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedChild(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing) : ""}
           ${profileOpen ? profilePanel(profile, user, loadingProfile) : ""}
+          ${enrollmentModalOpen ? enrollmentModal(selectedClass(), children, enrollmentPricing, enrollments, loadingEnrollmentPricing) : ""}
           ${noticeToast(notice)}
         </section>
       </main>
@@ -338,6 +353,15 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         render();
         if (activeSectionId === "notifications") {
           loadNotifications();
+        }
+        if (activeSectionId === "children") {
+          loadChildren();
+        }
+        if (activeSectionId === "classes") {
+          loadClasses();
+        }
+        if (activeSectionId === "enrollments") {
+          loadEnrollments();
         }
       });
     });
@@ -378,7 +402,17 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     });
     root.querySelectorAll("[data-operation-action]").forEach((button) => {
       button.addEventListener("click", () => {
-        if (isLogOnSiteAction(button.dataset.operationAction)) {
+        const action = button.dataset.operationAction;
+        if (role === "PARENT" && isBrowseClassesAction(action)) {
+          activeSectionId = "classes";
+          activeOperation = "";
+          notice = "";
+          error = "";
+          render();
+          loadClasses();
+          return;
+        }
+        if (isLogOnSiteAction(action)) {
           if (!selectedSite()) {
             notice = "";
             error = "Select a site before logging on.";
@@ -397,56 +431,63 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
           loadClasses();
           return;
         }
-        if (isProgramOperation(button.dataset.operationAction) && role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
+        if (isProgramOperation(action) && role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
           notice = "";
           error = "Log on to a site before managing programs.";
           activeOperation = "";
           render();
           return;
         }
-        if (isEditProgramOperation(button.dataset.operationAction) && !selectedProgram()) {
+        if (isEditProgramOperation(action) && !selectedProgram()) {
           notice = "";
           error = "Select a program before editing.";
           activeOperation = "";
           render();
           return;
         }
-        if (isClassOperation(button.dataset.operationAction) && role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
+        if (isClassOperation(action) && role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
           notice = "";
           error = "Log on to a site before managing classes.";
           activeOperation = "";
           render();
           return;
         }
-        if (isCreateClassOperation(button.dataset.operationAction) && !programs.length) {
+        if (isCreateClassOperation(action) && !programs.length) {
           notice = "";
           error = "Create a program before adding classes.";
           activeOperation = "";
           render();
           return;
         }
-        if (isEditClassOperation(button.dataset.operationAction) && !selectedClass()) {
+        if (isEditClassOperation(action) && !selectedClass()) {
           notice = "";
           error = "Select a class before editing.";
           activeOperation = "";
           render();
           return;
         }
-        if (isPricingOperation(button.dataset.operationAction) && !selectedClass()) {
+        if (isPricingOperation(action) && !selectedClass()) {
           notice = "";
           error = "Select a class before configuring pricing.";
           activeOperation = "";
           render();
           return;
         }
-        if (isEditSiteOperation(button.dataset.operationAction) && !selectedSite()) {
+        if (isEditChildOperation(action) && !selectedChild()) {
+          notice = "";
+          error = "Select a child before editing.";
+          activeOperation = "";
+          render();
+          return;
+        }
+        if (isEditSiteOperation(action) && !selectedSite()) {
           notice = "";
           error = "Select a site before editing.";
           activeOperation = "";
           render();
           return;
         }
-        activeOperation = button.dataset.operationAction;
+        activeOperation = action;
         notice = "";
         error = "";
         render();
@@ -473,6 +514,13 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         render();
       }
     });
+    root.querySelector("[data-enrollment-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeEnrollmentModal();
+      }
+    });
+    root.querySelector("[data-enrollment-cancel]")?.addEventListener("click", closeEnrollmentModal);
+    root.querySelector("[data-enrollment-form]")?.addEventListener("submit", handleEnrollmentSubmit);
 
     root.querySelector("[data-operation-form]")?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -587,6 +635,29 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       button.addEventListener("click", async () => {
         selectedClassId = button.dataset.classPublicLinkId;
         await copyPublicClassLink(button.dataset.classPublicLinkId);
+      });
+    });
+    root.querySelectorAll("[data-class-enroll-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedClassId = button.dataset.classEnrollId;
+        openEnrollmentModal();
+      });
+    });
+    root.querySelectorAll("[data-child-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedChildId = button.dataset.childId;
+        notice = "";
+        error = "";
+        render();
+      });
+    });
+    root.querySelectorAll("[data-child-edit-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedChildId = button.dataset.childEditId;
+        activeOperation = "Edit child";
+        notice = "";
+        error = "";
+        render();
       });
     });
 
@@ -791,6 +862,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   }
 
   async function handleOperationSubmit(form, activeSection, action) {
+    if (!validateRequiredCheckboxGroups(form)) {
+      return;
+    }
     const submitButton = form.querySelector("button[type='submit']");
     submitButton.disabled = true;
     submitButton.textContent = "Saving";
@@ -919,6 +993,34 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         return;
       }
 
+      if (isCreateChildOperation(action)) {
+        const formData = new FormData(form);
+        await createChild(childPayload(formData, school.tenantId));
+        notice = "Child saved to the database.";
+        error = "";
+        activeOperation = "";
+        childRows = null;
+        render();
+        await loadChildren();
+        return;
+      }
+
+      if (isEditChildOperation(action)) {
+        const child = selectedChild();
+        if (!child) {
+          throw new Error("Select a child before editing.");
+        }
+        const formData = new FormData(form);
+        await updateChild(child.id, childPayload(formData, school.tenantId, child));
+        notice = "Child updated in the database.";
+        error = "";
+        activeOperation = "";
+        childRows = null;
+        render();
+        await loadChildren();
+        return;
+      }
+
       notice = `${action} is ready for backend integration at ${endpointFor(activeSection, action)}.`;
       error = "";
       activeOperation = "";
@@ -948,6 +1050,18 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         return ["Loading classes..."];
       }
       return classRows || ["No classes have been created for this site yet."];
+    }
+    if (section.id === "children") {
+      if (loadingChildren && childRows === null) {
+        return ["Loading children..."];
+      }
+      return childRows || ["No child records loaded yet."];
+    }
+    if (section.id === "enrollments" && role === "PARENT") {
+      if (loadingEnrollments) {
+        return ["Loading enrollments..."];
+      }
+      return enrollments.length ? [] : ["No enrollments yet."];
     }
     if (section.id === "notifications") {
       if (loadingNotifications) {
@@ -1049,35 +1163,49 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                     <span>${escapeHtml(`${programName(classRecord.programId)} - ${classScheduleText(classRecord)}`)}</span>
                     <span>${escapeHtml(classRecord.status)}</span>
                   </button>
-                  <div class="row-actions">
-                    <button
-                      aria-label="Edit ${escapeHtml(classRecord.name)}"
-                      class="icon-button subtle-icon-button"
-                      data-class-edit-id="${escapeHtml(classRecord.id)}"
-                      title="Edit class"
-                      type="button"
-                    >
-                      ✎
-                    </button>
-                    <button
-                      aria-label="Configure pricing for ${escapeHtml(classRecord.name)}"
-                      class="icon-button subtle-icon-button"
-                      data-class-pricing-id="${escapeHtml(classRecord.id)}"
-                      title="Configure pricing"
-                      type="button"
-                    >
-                      $
-                    </button>
-                    <button
-                      aria-label="Copy public link for ${escapeHtml(classRecord.name)}"
-                      class="icon-button subtle-icon-button"
-                      data-class-public-link-id="${escapeHtml(classRecord.id)}"
-                      title="Copy public link"
-                      type="button"
-                    >
-                      ↗
-                    </button>
-                  </div>
+                  ${role === "PARENT" ? `
+                    <div class="row-actions">
+                      <button
+                        aria-label="Enroll in ${escapeHtml(classRecord.name)}"
+                        class="icon-button subtle-icon-button"
+                        data-class-enroll-id="${escapeHtml(classRecord.id)}"
+                        title="Enroll"
+                        type="button"
+                      >
+                        +
+                      </button>
+                    </div>
+                  ` : `
+                    <div class="row-actions">
+                      <button
+                        aria-label="Edit ${escapeHtml(classRecord.name)}"
+                        class="icon-button subtle-icon-button"
+                        data-class-edit-id="${escapeHtml(classRecord.id)}"
+                        title="Edit class"
+                        type="button"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        aria-label="Configure pricing for ${escapeHtml(classRecord.name)}"
+                        class="icon-button subtle-icon-button"
+                        data-class-pricing-id="${escapeHtml(classRecord.id)}"
+                        title="Configure pricing"
+                        type="button"
+                      >
+                        $
+                      </button>
+                      <button
+                        aria-label="Copy public link for ${escapeHtml(classRecord.name)}"
+                        class="icon-button subtle-icon-button"
+                        data-class-public-link-id="${escapeHtml(classRecord.id)}"
+                        title="Copy public link"
+                        type="button"
+                      >
+                        ↗
+                      </button>
+                    </div>
+                  `}
                 </div>
               `
             )
@@ -1087,6 +1215,47 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
     if (section.id === "notifications") {
       return notificationList(rows);
+    }
+    if (section.id === "children" && children.length) {
+      return `
+        <div class="data-list" role="listbox" aria-label="Children">
+          ${children.map((child) => `
+            <div class="data-row child-row ${child.id === selectedChildId ? "is-selected" : ""}">
+              <button class="program-row-main" data-child-id="${escapeHtml(child.id)}" type="button">
+                <span>${escapeHtml(`${child.firstName} ${child.lastName}`.trim())}</span>
+                <span>${escapeHtml([child.grade, child.school].filter(Boolean).join(" - ") || "Student profile")}</span>
+                <span>${escapeHtml(child.status || "active")}</span>
+              </button>
+              <button
+                aria-label="Edit ${escapeHtml(`${child.firstName} ${child.lastName}`.trim())}"
+                class="icon-button subtle-icon-button"
+                data-child-edit-id="${escapeHtml(child.id)}"
+                title="Edit child"
+                type="button"
+              >
+                ✎
+              </button>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+    if (section.id === "enrollments" && role === "PARENT" && enrollments.length) {
+      return `
+        <div class="data-list" aria-label="Enrollments">
+          ${enrollments.map((enrollment) => {
+            const child = children.find((item) => item.id === enrollment.childId);
+            const classRecord = classes.find((item) => item.id === enrollment.classId);
+            return `
+              <div class="data-row enrollment-row">
+                <strong>${escapeHtml(classRecord?.name || "Class")}</strong>
+                <span>${escapeHtml(child ? `${child.firstName} ${child.lastName}`.trim() : "Child")}</span>
+                <span>${escapeHtml(enrollment.status || "pending")}</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
     }
     return `
       <div class="data-list">
@@ -1161,6 +1330,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     return classes.find((classRecord) => classRecord.id === selectedClassId);
   }
 
+  function selectedChild() {
+    return children.find((child) => child.id === selectedChildId);
+  }
+
   async function copyPublicClassLink(classId) {
     const link = `${window.location.origin}/school/${encodeURIComponent(school.slug)}/classes/${encodeURIComponent(classId)}`;
     try {
@@ -1231,19 +1404,21 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
   async function loadClasses() {
     const site = selectedSite();
-    if (loadingClasses || !school?.tenantId || !site) {
+    if (loadingClasses || !school?.tenantId || (role !== "PARENT" && !site)) {
       return;
     }
     loadingClasses = true;
     try {
-      const response = await listClasses(school.tenantId, site.id);
+      const response = role === "PARENT"
+        ? await listAvailableClasses(school.tenantId)
+        : await listClasses(school.tenantId, site.id);
       classes = response.classes || [];
       if (selectedClassId && !classes.some((classRecord) => classRecord.id === selectedClassId)) {
         selectedClassId = "";
       }
       classRows = classes.length
         ? classes.map((classRecord) => `${classRecord.name} - ${programName(classRecord.programId)} - ${classScheduleText(classRecord)}`)
-        : ["No classes have been created for this site yet."];
+        : [role === "PARENT" ? "No active classes are available yet." : "No classes have been created for this site yet."];
     } catch (loadError) {
       classRows = ["Classes could not be loaded."];
       error = loadError instanceof Error ? loadError.message : "Classes could not be loaded.";
@@ -1271,6 +1446,114 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       }
     } finally {
       loadingClassPricing = false;
+      render();
+    }
+  }
+
+  async function loadChildren() {
+    if (loadingChildren || !school?.tenantId) {
+      return;
+    }
+    loadingChildren = true;
+    try {
+      const response = await listChildren(school.tenantId);
+      children = response.children || [];
+      if (selectedChildId && !children.some((child) => child.id === selectedChildId)) {
+        selectedChildId = "";
+      }
+      childRows = children.length
+        ? children.map((child) => `${child.firstName} ${child.lastName}`)
+        : ["No child records loaded yet."];
+      error = "";
+    } catch (loadError) {
+      childRows = ["Children could not be loaded."];
+      error = loadError instanceof Error ? loadError.message : "Children could not be loaded.";
+    } finally {
+      loadingChildren = false;
+      render();
+    }
+  }
+
+  async function loadEnrollments() {
+    if (loadingEnrollments || !school?.tenantId || role !== "PARENT") {
+      return;
+    }
+    loadingEnrollments = true;
+    try {
+      const response = await listParentEnrollments(school.tenantId);
+      enrollments = response.enrollments || [];
+    } catch (loadError) {
+      error = loadError instanceof Error ? loadError.message : "Enrollments could not be loaded.";
+    } finally {
+      loadingEnrollments = false;
+      render();
+    }
+  }
+
+  async function openEnrollmentModal() {
+    const classRecord = selectedClass();
+    if (!classRecord) {
+      error = "Select a class before enrolling.";
+      notice = "";
+      render();
+      return;
+    }
+    enrollmentModalOpen = true;
+    enrollmentPricing = null;
+    loadingEnrollmentPricing = true;
+    error = "";
+    notice = "";
+    render();
+    if (!children.length) {
+      await loadChildren();
+    }
+    try {
+      enrollmentPricing = await getClassPricing(classRecord.id);
+    } catch (pricingError) {
+      enrollmentPricing = emptyClassPricing();
+      error = pricingError instanceof Error ? pricingError.message : "Class pricing could not be loaded.";
+    } finally {
+      loadingEnrollmentPricing = false;
+      render();
+    }
+  }
+
+  function closeEnrollmentModal() {
+    enrollmentModalOpen = false;
+    enrollmentPricing = null;
+    loadingEnrollmentPricing = false;
+    render();
+  }
+
+  async function handleEnrollmentSubmit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const selectedChildren = formValues(new FormData(form), "childIds");
+    if (!selectedChildren.length) {
+      showTransientToast("Select at least one child.", "error");
+      return;
+    }
+    const submitButton = form.querySelector("button[type='submit']");
+    submitButton.disabled = true;
+    submitButton.textContent = "Enrolling";
+    try {
+      const result = await createEnrollment({
+        tenantId: school.tenantId,
+        classId: selectedClassId,
+        childIds: selectedChildren,
+        optionalFeeItemIds: formValues(new FormData(form), "optionalFeeItemIds"),
+      });
+      notice = result.paymentRequired
+        ? "Enrollment saved. Payment is required before the enrollment is complete."
+        : "Enrollment completed.";
+      error = "";
+      enrollmentModalOpen = false;
+      enrollmentPricing = null;
+      await loadEnrollments();
+      render();
+    } catch (enrollmentError) {
+      notice = "";
+      error = enrollmentError instanceof Error ? enrollmentError.message : "Enrollment could not be completed.";
       render();
     }
   }
@@ -1598,6 +1881,20 @@ function updateDirtyForm(form) {
   submitButton.title = isDirty ? "" : "No changes to save";
 }
 
+function validateRequiredCheckboxGroups(form) {
+  const groups = Array.from(form.querySelectorAll("[data-required-checkbox-group]"));
+  for (const group of groups) {
+    const checked = group.querySelectorAll("input[type='checkbox']:checked").length > 0;
+    if (!checked) {
+      group.scrollIntoView({ block: "center", behavior: "smooth" });
+      const legend = group.querySelector("legend")?.textContent?.replace("*", "").trim() || group.dataset.requiredCheckboxGroup;
+      showTransientToast(`Select at least one ${legend}.`, "error");
+      return false;
+    }
+  }
+  return true;
+}
+
 function serializeForm(form) {
   return JSON.stringify(Array.from(new FormData(form).entries()));
 }
@@ -1613,12 +1910,17 @@ function workspaceHint(section) {
     return "Manage the programs available at this site.";
   }
   if (section.id === "classes") {
-    return "Manage classes, pricing, and public links from each row.";
+    return section.actions.length
+      ? "Manage classes, pricing, and public links from each row."
+      : "Browse the classes published by this school.";
   }
   return "Choose an operation above to open the working panel for this area.";
 }
 
 function toolbarFor(section) {
+  if (!section.actions.length) {
+    return "";
+  }
   if (["sites", "programs", "classes"].includes(section.id)) {
     return "";
   }
@@ -1660,6 +1962,7 @@ function operationPanel(
   selectedSite,
   selectedProgram,
   selectedClass,
+  selectedChild,
   selectedPricing,
   user,
   sites = [],
@@ -1667,7 +1970,7 @@ function operationPanel(
   classes = [],
   loadingPricing = false
 ) {
-  const fields = fieldsFor(action, selectedSite, selectedProgram, selectedClass, selectedPricing, user, sites, programs);
+  const fields = fieldsFor(action, selectedSite, selectedProgram, selectedClass, selectedChild, selectedPricing, user, sites, programs);
   const siteOperation = isSiteOperation(action);
   const pricingOperation = isPricingOperation(action);
   const notificationOperation = isNotificationOperation(action);
@@ -1709,6 +2012,7 @@ function notificationModal(
   selectedSite,
   selectedProgram,
   selectedClass,
+  selectedChild,
   selectedPricing,
   user,
   sites = [],
@@ -1718,9 +2022,108 @@ function notificationModal(
 ) {
   return `
     <div class="modal-backdrop" data-notification-modal>
-      ${operationPanel(section, action, selectedSite, selectedProgram, selectedClass, selectedPricing, user, sites, programs, classes, loadingPricing)}
+      ${operationPanel(section, action, selectedSite, selectedProgram, selectedClass, selectedChild, selectedPricing, user, sites, programs, classes, loadingPricing)}
     </div>
   `;
+}
+
+function enrollmentModal(classRecord, children, pricing, enrollments, loadingPricing) {
+  const feeItems = pricing?.feeItems || [];
+  const requiredFees = feeItems.filter((item) => item.category === "required_fees");
+  const optionalFees = feeItems.filter((item) => item.category === "optional_fees");
+  const enrolledChildIds = new Set((enrollments || [])
+    .filter((enrollment) => enrollment.classId === classRecord?.id && !["cancelled", "rejected"].includes(enrollment.status))
+    .map((enrollment) => enrollment.childId));
+  const selectableChildren = children || [];
+  const allChildrenEnrolled = selectableChildren.length > 0 && selectableChildren.every((child) => enrolledChildIds.has(child.id));
+  return `
+    <div class="modal-backdrop" data-enrollment-modal>
+      <form class="operation-panel enrollment-modal-panel" data-enrollment-form>
+        <div class="workspace-heading">
+          <h3>Enroll children</h3>
+          <p>${escapeHtml(classRecord ? `${classRecord.name} - ${classScheduleSummary(classRecord)}` : "Choose children for this class.")}</p>
+        </div>
+
+        <section class="enrollment-summary">
+          <div>
+            <strong>Required fees</strong>
+            ${
+              requiredFees.length
+                ? requiredFees.map((item) => `<span>${escapeHtml(item.name)}: ${formatMoney(item.fee, item.currency)}</span>`).join("")
+                : "<span>None</span>"
+            }
+          </div>
+          <div>
+            <strong>Status after submit</strong>
+            <span>${requiredFees.some((item) => item.fee > 0) ? "Pending payment" : "Enrolled"}</span>
+          </div>
+        </section>
+
+        <fieldset class="checkbox-field" data-required-checkbox-group="children">
+          <legend>Children <span class="required-marker">*</span></legend>
+          <div class="checkbox-grid two-column-checkbox-grid">
+            ${
+              selectableChildren.length
+                ? selectableChildren.map((child) => {
+                    const alreadyEnrolled = enrolledChildIds.has(child.id);
+                    return `
+                      <label class="checkbox-option ${alreadyEnrolled ? "is-disabled" : ""}">
+                        <input
+                          ${alreadyEnrolled ? "checked disabled" : ""}
+                          name="childIds"
+                          type="checkbox"
+                          value="${escapeHtml(child.id)}"
+                        />
+                        <span>${escapeHtml(`${child.firstName} ${child.lastName}`.trim())}${alreadyEnrolled ? " - already enrolled" : ""}</span>
+                      </label>
+                    `;
+                  }).join("")
+                : `<p class="context-note">Add a child before enrolling in a class.</p>`
+            }
+          </div>
+        </fieldset>
+
+        <fieldset class="checkbox-field">
+          <legend>Optional fees</legend>
+          <div class="checkbox-grid two-column-checkbox-grid">
+            ${
+              loadingPricing
+                ? `<p class="context-note">Loading fees...</p>`
+                : optionalFees.length
+                  ? optionalFees.map((item) => `
+                    <label class="checkbox-option">
+                      <input name="optionalFeeItemIds" type="checkbox" value="${escapeHtml(item.id)}" />
+                      <span>${escapeHtml(item.name)} - ${formatMoney(item.fee, item.currency)}</span>
+                    </label>
+                  `).join("")
+                  : `<p class="context-note">No optional fees are configured for this class.</p>`
+            }
+          </div>
+        </fieldset>
+
+        <div class="operation-actions">
+          <button ${!selectableChildren.length || allChildrenEnrolled ? "disabled" : ""} type="submit">Enroll selected</button>
+          <button class="secondary-button" data-enrollment-cancel type="button">Cancel</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function classScheduleSummary(classRecord) {
+  const time = [classRecord?.startTime, classRecord?.endTime].filter(Boolean).join("-");
+  if (classRecord?.classType === "weekly") {
+    const days = (classRecord.weekdays || []).join(", ");
+    return [days, time].filter(Boolean).join(" ");
+  }
+  return time || "Time range";
+}
+
+function formatMoney(cents, currency = "USD") {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency || "USD",
+  }).format(Number(cents || 0) / 100);
 }
 
 function operationTitle(action) {
@@ -1757,6 +2160,12 @@ function operationDescription(section, action) {
   }
   if (isNotificationOperation(action)) {
     return "Upload an .eml template, review recipients, send a test email, then confirm the final BCC send.";
+  }
+  if (isCreateChildOperation(action)) {
+    return "Add a student profile for your family.";
+  }
+  if (isEditChildOperation(action)) {
+    return "Update the selected student profile.";
   }
   return `Complete this ${section.title.toLowerCase()} action.`;
 }
@@ -1798,6 +2207,10 @@ function isClassOperation(action) {
   return action.toLowerCase().includes("class");
 }
 
+function isBrowseClassesAction(action) {
+  return action.toLowerCase() === "browse classes";
+}
+
 function isCreateClassOperation(action) {
   const normalized = action.toLowerCase();
   return normalized.includes("class") && (normalized.includes("create") || normalized.includes("add"));
@@ -1815,6 +2228,16 @@ function isPricingOperation(action) {
 function isNotificationOperation(action) {
   const normalized = action.toLowerCase();
   return normalized.includes("notification") || normalized.includes("message") || normalized === "free send";
+}
+
+function isCreateChildOperation(action) {
+  const normalized = action.toLowerCase();
+  return normalized.includes("child") && (normalized.includes("add") || normalized.includes("create"));
+}
+
+function isEditChildOperation(action) {
+  const normalized = action.toLowerCase();
+  return normalized.includes("child") && normalized.includes("edit");
 }
 
 function notificationComposePanel(classes = []) {
@@ -1933,7 +2356,11 @@ function fieldFor(field) {
   }
   if (field.type === "checkbox-group") {
     return `
-      <fieldset class="checkbox-field" ${field.toggleFor ? `data-toggle-for="${escapeHtml(field.toggleFor)}"` : ""}>
+      <fieldset
+        class="checkbox-field"
+        ${field.toggleFor ? `data-toggle-for="${escapeHtml(field.toggleFor)}"` : ""}
+        ${field.required ? `data-required-checkbox-group="${escapeHtml(field.name)}"` : ""}
+      >
         <legend>${fieldLabel(field)}</legend>
         ${inputFor(field)}
       </fieldset>
@@ -1978,19 +2405,21 @@ function inputFor(field) {
     return `
       <div class="checkbox-grid">
         ${(field.options || [])
-          .map(
-            (option) => `
+          .map((option) => {
+            const value = optionValue(option);
+            const label = optionLabel(option);
+            return `
               <label class="checkbox-option">
                 <input
-                  ${selected.has(option) ? "checked" : ""}
+                  ${selected.has(value) ? "checked" : ""}
                   name="${escapeHtml(field.name)}"
                   type="checkbox"
-                  value="${escapeHtml(option)}"
+                  value="${escapeHtml(value)}"
                 />
-                <span>${escapeHtml(option)}</span>
+                <span>${escapeHtml(label)}</span>
               </label>
-            `
-          )
+            `;
+          })
           .join("")}
       </div>
     `;
@@ -2039,11 +2468,17 @@ function inputFor(field) {
 }
 
 function optionValue(option) {
-  return String(typeof option === "object" ? option.value : option);
+  if (option && typeof option === "object") {
+    return String(option.value ?? option.label ?? "");
+  }
+  return String(option ?? "");
 }
 
 function optionLabel(option) {
-  return String(typeof option === "object" ? option.label : option);
+  if (option && typeof option === "object") {
+    return String(option.label ?? option.value ?? "");
+  }
+  return String(option ?? "");
 }
 
 function datalistFor(id, suggestions) {
@@ -2059,6 +2494,7 @@ function fieldsFor(
   selectedSite = null,
   selectedProgram = null,
   selectedClass = null,
+  selectedChild = null,
   selectedPricing = null,
   user = null,
   sites = [],
@@ -2308,10 +2744,62 @@ function fieldsFor(
     ];
   }
   if (normalized.includes("child") || normalized.includes("student")) {
+    const childForForm = isCreateChildOperation(action) ? null : selectedChild;
     return [
-      { name: "firstName", label: "First name", placeholder: "First name" },
-      { name: "lastName", label: "Last name", placeholder: "Last name" },
-      { name: "dateOfBirth", label: "Date of birth", type: "date" },
+      { name: "firstName", label: "First name", placeholder: "First name", required: true, value: childForForm?.firstName || "" },
+      { name: "lastName", label: "Last name", placeholder: "Last name", required: true, value: childForForm?.lastName || "" },
+      { name: "dateOfBirth", label: "Date of birth", type: "date", required: true, value: childForForm?.dateOfBirth || "" },
+      {
+        name: "gender",
+        label: "Gender",
+        type: "select",
+        required: true,
+        options: [
+          { value: "", label: "Select gender" },
+          { value: "female", label: "Female" },
+          { value: "male", label: "Male" },
+          { value: "non_binary", label: "Non-binary" },
+          { value: "prefer_not_to_say", label: "Prefer not to say" },
+        ],
+        value: childForForm?.gender || "",
+      },
+      {
+        name: "grade",
+        label: "Grade",
+        type: "select",
+        required: true,
+        options: [
+          { value: "", label: "Select grade" },
+          ...gradeLevelOptions().map((grade) => ({ value: grade, label: grade })),
+        ],
+        value: childForForm?.grade || "",
+      },
+      { name: "school", label: "School", placeholder: "Current school name", required: true, value: childForForm?.school || "" },
+      {
+        name: "race",
+        label: "Race",
+        type: "checkbox-group",
+        required: true,
+        options: [
+          { value: "american_indian_or_alaska_native", label: "American Indian or Alaska Native" },
+          { value: "asian", label: "Asian" },
+          { value: "black_or_african_american", label: "Black or African American" },
+          { value: "hispanic_or_latino", label: "Hispanic or Latino" },
+          { value: "middle_eastern_or_north_african", label: "Middle Eastern or North African" },
+          { value: "native_hawaiian_or_pacific_islander", label: "Native Hawaiian or Pacific Islander" },
+          { value: "white", label: "White" },
+          { value: "two_or_more_races", label: "Two or more races" },
+          { value: "prefer_not_to_say", label: "Prefer not to say" },
+        ],
+        values: childForForm?.race || [],
+      },
+      {
+        name: "note",
+        label: "Note",
+        type: "textarea",
+        placeholder: "Allergies, pickup notes, learning needs, or anything the school should know.",
+        value: childForForm?.note || "",
+      },
     ];
   }
   if (normalized.includes("enrollment") || normalized.includes("register")) {
@@ -2420,6 +2908,20 @@ function classPayload(formData, classRecord = null) {
     endDate: formText(formData, "endDate", classRecord?.endDate),
     startTime: formText(formData, "startTime", classRecord?.startTime),
     endTime: formText(formData, "endTime", classRecord?.endTime),
+  };
+}
+
+function childPayload(formData, tenantId, child = null) {
+  return {
+    tenantId,
+    firstName: formText(formData, "firstName", child?.firstName),
+    lastName: formText(formData, "lastName", child?.lastName),
+    dateOfBirth: formText(formData, "dateOfBirth", child?.dateOfBirth) || null,
+    gender: formText(formData, "gender", child?.gender),
+    grade: formText(formData, "grade", child?.grade),
+    school: formText(formData, "school", child?.school),
+    race: formValues(formData, "race"),
+    note: formText(formData, "note", child?.note),
   };
 }
 

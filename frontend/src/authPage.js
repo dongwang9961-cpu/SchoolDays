@@ -134,6 +134,15 @@ export function renderAuthPage({
       lastName: String(formData.get("lastName") || "").trim(),
       phone: String(formData.get("phone") || "").trim(),
     };
+    if (mode === "complete") {
+      request.address = {
+        streetAddress: String(formData.get("streetAddress") || "").trim(),
+        suite: String(formData.get("suite") || "").trim(),
+        city: String(formData.get("city") || "").trim(),
+        state: String(formData.get("state") || "").trim(),
+        zipCode: String(formData.get("zipCode") || "").trim(),
+      };
+    }
 
     if (mode === "teacher") {
       return acceptTeacherInvitation(request);
@@ -252,7 +261,7 @@ function completeRegistrationForm(hasEmailLinkToken = false) {
         <p>${hasEmailLinkToken ? "Create your account from the secure email link." : "Use the secure token from your email link to finish your account."}</p>
       </div>
 
-      ${registrationFields("Create account", { hasEmailLinkToken })}
+      ${registrationFields("Create account", { hasEmailLinkToken, includeAddress: true })}
     </form>
   `;
 }
@@ -283,7 +292,7 @@ function schoolInvitationForm(hasEmailLinkToken = false) {
   `;
 }
 
-function registrationFields(buttonText, { hasEmailLinkToken = false } = {}) {
+function registrationFields(buttonText, { hasEmailLinkToken = false, includeAddress = false } = {}) {
   return `
     ${hasEmailLinkToken
       ? `<input name="token" required type="hidden" />`
@@ -320,6 +329,8 @@ function registrationFields(buttonText, { hasEmailLinkToken = false } = {}) {
       <input autocomplete="tel" maxlength="50" name="phone" placeholder="555-0100" required type="tel" />
     </label>
 
+    ${includeAddress ? parentAddressFields() : ""}
+
     <label>
       <span>Password <span class="required-marker" aria-label="required">*</span></span>
       <input autocomplete="new-password" maxlength="128" minlength="8" name="password" required type="password" />
@@ -330,6 +341,57 @@ function registrationFields(buttonText, { hasEmailLinkToken = false } = {}) {
 
     <button data-submit type="submit">${buttonText}</button>
   `;
+}
+
+function parentAddressFields() {
+  return `
+    <div class="form-heading compact-heading">
+      <h3>Home address</h3>
+      <p>Required for parent accounts.</p>
+    </div>
+
+    <label>
+      <span>Street address <span class="required-marker" aria-label="required">*</span></span>
+      <input autocomplete="address-line1" maxlength="200" name="streetAddress" required type="text" />
+    </label>
+
+    <label>
+      <span>Suite or apartment</span>
+      <input autocomplete="address-line2" maxlength="100" name="suite" type="text" />
+    </label>
+
+    <div class="field-grid">
+      <label>
+        <span>City <span class="required-marker" aria-label="required">*</span></span>
+        <input autocomplete="address-level2" maxlength="100" name="city" required type="text" />
+      </label>
+
+      <label>
+        <span>State <span class="required-marker" aria-label="required">*</span></span>
+        <select autocomplete="address-level1" name="state" required>
+          ${stateOptions()}
+        </select>
+      </label>
+    </div>
+
+    <label>
+      <span>ZIP code <span class="required-marker" aria-label="required">*</span></span>
+      <input autocomplete="postal-code" maxlength="20" name="zipCode" required type="text" />
+    </label>
+  `;
+}
+
+function stateOptions() {
+  return [
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+    "DC"
+  ]
+    .map((state) => `<option value="${state}"${state === "MI" ? " selected" : ""}>${state}</option>`)
+    .join("");
 }
 
 function storeAuthResponse(response) {

@@ -2,6 +2,7 @@ package com.schooldays.dao.classroom;
 
 import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
 import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
+import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 
 import java.util.List;
 import java.util.Optional;
@@ -29,6 +30,19 @@ public class ClassDao {
                 .where(CLASSES.TENANT_ID.eq(tenantId))
                 .and(PROGRAMS.SITE_ID.eq(siteId))
                 .orderBy(CLASSES.SEQ_ID.asc())
+                .fetchInto(CLASSES);
+    }
+
+    public List<ClassesRecord> findActiveByTenant(UUID tenantId) {
+        return dsl.select(CLASSES.fields())
+                .from(CLASSES)
+                .join(PROGRAMS).on(PROGRAMS.ID.eq(CLASSES.PROGRAM_ID))
+                .join(SCHOOL_SITES).on(SCHOOL_SITES.ID.eq(PROGRAMS.SITE_ID))
+                .where(CLASSES.TENANT_ID.eq(tenantId))
+                .and(CLASSES.STATUS.eq("active"))
+                .and(PROGRAMS.STATUS.eq("active"))
+                .and(SCHOOL_SITES.STATUS.eq("active"))
+                .orderBy(CLASSES.START_DATE.asc(), CLASSES.SEQ_ID.asc())
                 .fetchInto(CLASSES);
     }
 
