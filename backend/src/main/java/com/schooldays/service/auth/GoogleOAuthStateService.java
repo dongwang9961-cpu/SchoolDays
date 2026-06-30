@@ -30,9 +30,9 @@ public class GoogleOAuthStateService {
         this.clock = Clock.systemUTC();
     }
 
-    public String issue(UUID tenantId) {
+    public String issue(UUID tenantId, String returnUrl) {
         long expiresAtEpochSecond = clock.instant().plusSeconds(STATE_TTL_SECONDS).getEpochSecond();
-        String payload = tenantId + ":" + expiresAtEpochSecond + ":" + tokenGenerator.newToken();
+        String payload = tenantId + "\n" + expiresAtEpochSecond + "\n" + tokenGenerator.newToken() + "\n" + returnUrl;
         String encodedPayload = base64Url(payload.getBytes(StandardCharsets.UTF_8));
         return encodedPayload + "." + sign(encodedPayload);
     }
@@ -44,8 +44,8 @@ public class GoogleOAuthStateService {
         }
 
         String payload = new String(Base64.getUrlDecoder().decode(parts[0]), StandardCharsets.UTF_8);
-        String[] values = payload.split(":", -1);
-        if (values.length != 3) {
+        String[] values = payload.split("\n", -1);
+        if (values.length != 4) {
             throw new InvalidAuthRequestException("Google login state is invalid");
         }
 
@@ -54,7 +54,7 @@ public class GoogleOAuthStateService {
             if (clock.instant().getEpochSecond() > expiresAtEpochSecond) {
                 throw new InvalidAuthRequestException("Google login state is expired");
             }
-            return new GoogleOAuthState(UUID.fromString(values[0]));
+            return new GoogleOAuthState(UUID.fromString(values[0]), values[3]);
         } catch (IllegalArgumentException exception) {
             throw new InvalidAuthRequestException("Google login state is invalid");
         }

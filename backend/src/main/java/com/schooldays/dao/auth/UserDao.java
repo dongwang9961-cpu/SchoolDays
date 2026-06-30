@@ -32,6 +32,10 @@ public class UserDao {
                 .map(UsersRecord::getId);
     }
 
+    public Optional<UUID> findUserIdByEmail(String email) {
+        return userRepository.findByEmail(email).map(UsersRecord::getId);
+    }
+
     public UUID createOrUpdatePasswordUser(
             String email,
             String passwordHash,

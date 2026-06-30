@@ -1,8 +1,10 @@
 package com.schooldays.service.auth;
 
 import java.net.URLEncoder;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -17,9 +19,11 @@ import com.schooldays.dao.auth.TenantDao;
 import com.schooldays.dao.auth.TenantInvitationDao;
 import com.schooldays.dao.auth.UserDao;
 import com.schooldays.dao.auth.UserIdentityDao;
+import com.schooldays.dto.auth.AuthConfigResponse;
 import com.schooldays.dto.auth.AuthResponse;
 import com.schooldays.dto.auth.AuthenticatedUserResponse;
 import com.schooldays.dto.auth.CompleteRegistrationRequest;
+import com.schooldays.dto.auth.GoogleCallbackResult;
 import com.schooldays.dto.auth.GoogleStartResponse;
 import com.schooldays.dto.auth.LoginRequest;
 import com.schooldays.dto.auth.RegistrationLinkRequest;
@@ -52,6 +56,7 @@ public class AuthService {
 
     private static final Set<String> SELF_SERVICE_ROLES = Set.of("PARENT");
     private static final long REGISTRATION_LINK_TTL_HOURS = 48;
+    private static final String GOOGLE_PENDING_PHONE = "__google_profile_pending__";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final PasswordEncoder passwordEncoder;
@@ -70,6 +75,8 @@ public class AuthService {
     private final SystemEmailService systemEmailService;
     private final RestClient restClient;
     private final String publicBaseUrl;
+    private final String frontendBaseUrl;
+    private final List<String> allowedReturnOrigins;
     private final String systemEmailFromEmail;
     private final String googleClientId;
     private final String googleClientSecret;
@@ -93,10 +100,12 @@ public class AuthService {
             GoogleOAuthStateService googleOAuthStateService,
             SystemEmailService systemEmailService,
             @Value("${schooldays.public-base-url:http://localhost:8080}") String publicBaseUrl,
+            @Value("${schooldays.frontend-base-url:http://localhost:5173}") String frontendBaseUrl,
+            @Value("${schooldays.oauth.allowed-return-origins:${schooldays.cors.allowed-origins}}") List<String> allowedReturnOrigins,
             @Value("${schooldays.system-email.from-email:noreply@schooldays.cc}") String systemEmailFromEmail,
             @Value("${schooldays.security.google.client-id:}") String googleClientId,
             @Value("${schooldays.security.google.client-secret:}") String googleClientSecret,
-            @Value("${schooldays.security.google.redirect-uri:http://localhost:8080/api/auth/google/callback}") String googleRedirectUri,
+            @Value("${schooldays.security.google.redirect-uri:}") String googleRedirectUri,
             @Value("${schooldays.security.google.token-uri:https://oauth2.googleapis.com/token}") String googleTokenUri,
             @Value("${schooldays.security.google.user-info-uri:https://openidconnect.googleapis.com/v1/userinfo}") String googleUserInfoUri
     ) {
@@ -115,11 +124,15 @@ public class AuthService {
         this.googleOAuthStateService = googleOAuthStateService;
         this.systemEmailService = systemEmailService;
         this.restClient = RestClient.create();
-        this.publicBaseUrl = publicBaseUrl;
+        this.publicBaseUrl = stripTrailingSlash(publicBaseUrl);
+        this.frontendBaseUrl = stripTrailingSlash(frontendBaseUrl);
+        this.allowedReturnOrigins = allowedReturnOrigins == null ? List.of() : allowedReturnOrigins;
         this.systemEmailFromEmail = systemEmailFromEmail;
         this.googleClientId = googleClientId;
         this.googleClientSecret = googleClientSecret;
-        this.googleRedirectUri = googleRedirectUri;
+        this.googleRedirectUri = isBlank(googleRedirectUri)
+                ? this.publicBaseUrl + "/api/auth/google/callback"
+                : googleRedirectUri;
         this.googleTokenUri = googleTokenUri;
         this.googleUserInfoUri = googleUserInfoUri;
     }
@@ -133,6 +146,10 @@ public class AuthService {
                 "parent_self_service",
                 null
         );
+    }
+
+    public AuthConfigResponse config() {
+        return new AuthConfigResponse(googleLoginEnabled());
     }
 
     @Transactional
@@ -186,14 +203,14 @@ public class AuthService {
         return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
     }
 
-    public GoogleStartResponse googleStart(UUID tenantId) {
+    public GoogleStartResponse googleStart(UUID tenantId, String requestOrigin) {
         if (tenantId == null) {
             throw new InvalidAuthRequestException("Tenant is required for Google login");
         }
-        if (isBlank(googleClientId) || isBlank(googleClientSecret)) {
+        if (!googleLoginEnabled()) {
             throw new InvalidAuthRequestException("Google login is not configured");
         }
-        String state = googleOAuthStateService.issue(tenantId);
+        String state = googleOAuthStateService.issue(tenantId, googleReturnUrl(tenantId, requestOrigin));
         String authorizationUrl = "https://accounts.google.com/o/oauth2/v2/auth"
                 + "?response_type=code"
                 + "&client_id=" + urlEncode(googleClientId)
@@ -203,8 +220,12 @@ public class AuthService {
         return new GoogleStartResponse(authorizationUrl, state);
     }
 
+    private boolean googleLoginEnabled() {
+        return !isBlank(googleClientId) && !isBlank(googleClientSecret);
+    }
+
     @Transactional
-    public AuthResponse googleCallback(String code, String state) {
+    public GoogleCallbackResult googleCallback(String code, String state) {
         if (code == null || code.isBlank() || state == null || state.isBlank()) {
             throw new InvalidAuthRequestException("Google authorization code and state are required");
         }
@@ -224,15 +245,22 @@ public class AuthService {
 
         OffsetDateTime now = OffsetDateTime.now();
         UUID userId = userIdentityDao.findUserIdByProviderSubject("google", providerSubject)
-                .orElseGet(() -> userDao.findUserIdWithPhoneByEmail(email)
-                        .orElseThrow(() -> new InvalidAuthRequestException(
-                                "Phone number is required before Google login can create an account. Register with an email link first."
+                .orElseGet(() -> userDao.findUserIdByEmail(email)
+                        .orElseGet(() -> userDao.createOrUpdateExternalUser(
+                                email,
+                                googleFirstName(userInfo),
+                                googleLastName(userInfo),
+                                GOOGLE_PENDING_PHONE,
+                                now
                         )));
         userIdentityDao.linkIdentity(userId, "google", providerSubject, email, true, now);
         roleDao.assignRole(userId, oauthState.tenantId(), "PARENT");
 
         AuthenticatedUser principal = userDetailsService.loadById(userId);
-        return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
+        return new GoogleCallbackResult(
+                AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal),
+                oauthState.returnUrl()
+        );
     }
 
     @Transactional
@@ -366,6 +394,60 @@ public class AuthService {
                 .orElse(publicBaseUrl + "?token=" + encodedToken);
     }
 
+    private String googleReturnUrl(UUID tenantId, String requestOrigin) {
+        String origin = allowedReturnOrigin(requestOrigin);
+        return tenantDao.findActivePublicSchoolById(tenantId)
+                .map(school -> origin + "/school/" + urlEncode(school.slug()))
+                .orElse(origin);
+    }
+
+    private String allowedReturnOrigin(String requestOrigin) {
+        String origin = normalizeOrigin(requestOrigin);
+        if (isAllowedReturnOrigin(origin)) {
+            return origin;
+        }
+        if (isAllowedReturnOrigin(frontendBaseUrl)) {
+            return frontendBaseUrl;
+        }
+        return allowedReturnOrigins.stream()
+                .map(this::normalizeOrigin)
+                .filter(value -> !isBlank(value))
+                .findFirst()
+                .orElse(frontendBaseUrl);
+    }
+
+    private boolean isAllowedReturnOrigin(String origin) {
+        if (isBlank(origin)) {
+            return false;
+        }
+        return allowedReturnOrigins.stream()
+                .map(this::normalizeOrigin)
+                .anyMatch(origin::equals);
+    }
+
+    private String normalizeOrigin(String value) {
+        if (isBlank(value)) {
+            return "";
+        }
+        try {
+            URI uri = URI.create(stripTrailingSlash(value.trim()));
+            if (isBlank(uri.getScheme()) || isBlank(uri.getHost())) {
+                return "";
+            }
+            int port = uri.getPort();
+            return uri.getScheme() + "://" + uri.getHost() + (port >= 0 ? ":" + port : "");
+        } catch (IllegalArgumentException exception) {
+            return "";
+        }
+    }
+
+    private String stripTrailingSlash(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
     private UUID createOrUpdateInvitedUser(CompleteRegistrationRequest request, String email, OffsetDateTime now) {
         return userDao.createOrUpdatePasswordUser(
                 email,
@@ -393,6 +475,32 @@ public class AuthService {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Unable to serialize parent address", exception);
         }
+    }
+
+    private String googleFirstName(Map<String, Object> userInfo) {
+        String givenName = stringClaim(userInfo, "given_name");
+        if (!isBlank(givenName)) {
+            return givenName;
+        }
+        String name = stringClaim(userInfo, "name");
+        if (isBlank(name)) {
+            return "";
+        }
+        String[] parts = name.trim().split("\\s+", 2);
+        return parts[0];
+    }
+
+    private String googleLastName(Map<String, Object> userInfo) {
+        String familyName = stringClaim(userInfo, "family_name");
+        if (!isBlank(familyName)) {
+            return familyName;
+        }
+        String name = stringClaim(userInfo, "name");
+        if (isBlank(name)) {
+            return "";
+        }
+        String[] parts = name.trim().split("\\s+", 2);
+        return parts.length > 1 ? parts[1] : "";
     }
 
     private void put(ObjectNode node, String field, String value) {

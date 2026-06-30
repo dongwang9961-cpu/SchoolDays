@@ -2,6 +2,7 @@ import {
   acceptTeacherInvitation,
   acceptTenantInvitation,
   completeRegistration,
+  getAuthConfig,
   login,
   requestParentRegistrationLink,
   startGoogleRegistration,
@@ -66,6 +67,7 @@ export function renderAuthPage({
 
   modeSelect?.addEventListener("change", () => showMode(modeSelect.value));
   googleRegisterButton?.addEventListener("click", handleGoogleRegistration);
+  configureGoogleRegistration();
 
   forms.forEach((form) => {
     form.addEventListener("submit", (event) => handleSubmit(event, form));
@@ -177,6 +179,30 @@ export function renderAuthPage({
     }
     throw new Error("Open the school website URL before registering as a parent.");
   }
+
+  async function configureGoogleRegistration() {
+    if (!googleRegisterButton) {
+      return;
+    }
+
+    try {
+      const config = await getAuthConfig();
+      if (config.googleLoginEnabled) {
+        googleRegisterButton.disabled = false;
+        googleRegisterButton.textContent = "Continue with Google";
+        return;
+      }
+    } catch (error) {
+      // Keep email-link registration available if config cannot be loaded.
+    }
+
+    root.querySelector("[data-google-register-row]")?.remove();
+    root.querySelector("[data-google-register-divider]")?.remove();
+    const hint = root.querySelector("[data-parent-register-hint]");
+    if (hint) {
+      hint.textContent = "Request a secure email link.";
+    }
+  }
 }
 
 export function contextNote(html) {
@@ -233,12 +259,14 @@ function parentRegisterForm() {
     <form class="auth-form" data-auth-form="register" hidden>
       <div class="form-heading">
         <h2>Register as a parent</h2>
-        <p>Continue with Google or request a secure email link.</p>
+        <p data-parent-register-hint>Continue with Google or request a secure email link.</p>
       </div>
 
-      <button class="secondary-button" data-google-register type="button">Continue with Google</button>
+      <div data-google-register-row>
+        <button class="secondary-button" data-google-register disabled type="button">Checking Google</button>
+      </div>
 
-      <div class="form-divider"><span>or</span></div>
+      <div class="form-divider" data-google-register-divider><span>or</span></div>
 
       <label>
         <span>Email <span class="required-marker" aria-label="required">*</span></span>

@@ -1,27 +1,49 @@
 import { contextError, contextNote, escapeHtml, renderAuthPage } from "./authPage.js";
+import { updateProfile } from "./api/account.js";
+import { getCurrentAuthUser } from "./api/auth.js";
 import { ApiError } from "./api/client.js";
 import { getPublicSchool } from "./api/schools.js";
 import { renderSchoolDashboard } from "./schoolAdminDashboard.js";
 import "./styles.css";
 
 const urlParams = new URLSearchParams(window.location.search);
+consumeAccessTokenHash();
 const schoolRoute = getSchoolRouteFromPath(window.location.pathname);
 const schoolSlug = schoolRoute.slug;
 const schoolLookup = schoolSlug ? await loadSchool(schoolSlug) : { school: null, error: null };
 const school = schoolLookup.school;
 const schoolLoadError = schoolSlug && !school;
 const initialMode = getInitialMode();
+const currentAuth = school ? await loadExistingSession() : null;
 
-renderAuthPage({
-  brandEyebrow: school ? school.name : "SchoolDays",
-  brandTitle: school ? "Access your school account" : "School website",
-  brandDescription: brandDescription(),
-  contextMarkup: schoolContextMarkup(),
-  initialMode,
-  modes: modeOptions(),
-  onAuthenticated: handleAuthenticated,
-  tenantId: school?.tenantId || "",
-});
+if (currentAuth) {
+  handleAuthenticated(currentAuth);
+} else {
+  renderAuthPage({
+    brandEyebrow: school ? school.name : "SchoolDays",
+    brandTitle: school ? "Access your school account" : "School website",
+    brandDescription: brandDescription(),
+    contextMarkup: schoolContextMarkup(),
+    initialMode,
+    modes: modeOptions(),
+    onAuthenticated: handleAuthenticated,
+    tenantId: school?.tenantId || "",
+  });
+}
+
+function consumeAccessTokenHash() {
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+  const hashParams = new URLSearchParams(hash);
+  const accessToken = hashParams.get("accessToken");
+  if (!accessToken) {
+    return;
+  }
+  localStorage.setItem("schooldays.accessToken", accessToken);
+  hashParams.delete("accessToken");
+  const nextHash = hashParams.toString();
+  const nextUrl = window.location.pathname + window.location.search + (nextHash ? `#${nextHash}` : "");
+  window.history.replaceState(null, "", nextUrl);
+}
 
 function getSchoolRouteFromPath(pathname) {
   const segments = pathname.split("/").filter(Boolean);
@@ -37,6 +59,18 @@ async function loadSchool(slug) {
     return { school: await getPublicSchool(slug), error: null };
   } catch (error) {
     return { school: null, error };
+  }
+}
+
+async function loadExistingSession() {
+  if (!localStorage.getItem("schooldays.accessToken")) {
+    return null;
+  }
+  try {
+    return { user: await getCurrentAuthUser() };
+  } catch (error) {
+    localStorage.removeItem("schooldays.accessToken");
+    return null;
   }
 }
 
@@ -144,6 +178,10 @@ function schoolLookupErrorText() {
 function handleAuthenticated(response) {
   const role = school ? schoolPortalRole(response.user, school.tenantId) : "";
   if (role) {
+    if (role === "PARENT" && parentProfileIncomplete(response.user)) {
+      renderParentProfileCompletion(response);
+      return;
+    }
     renderSchoolDashboard({
       role,
       school,
@@ -172,6 +210,102 @@ function handleAuthenticated(response) {
   document.querySelector("[data-return-login]").addEventListener("click", () => {
     localStorage.removeItem("schooldays.accessToken");
     returnToLoginPage();
+  });
+}
+
+function parentProfileIncomplete(user) {
+  return !user?.phone || user.phone === "__google_profile_pending__";
+}
+
+function renderParentProfileCompletion(response) {
+  document.querySelector("#root").innerHTML = `
+    <main class="login-page">
+      <section class="auth-panel standalone-panel">
+        ${contextNote(`Signed in with Google as <strong>${escapeHtml(response.user.email)}</strong>`)}
+        <form class="auth-form" data-parent-profile-completion>
+          <div class="form-heading">
+            <h2>Complete parent profile</h2>
+            <p>Phone and home address are required before opening the parent portal.</p>
+          </div>
+
+          <label>
+            <span>Phone <span class="required-marker" aria-label="required">*</span></span>
+            <input autocomplete="tel" maxlength="50" name="phone" placeholder="555-0100" required type="tel" />
+          </label>
+
+          <div class="form-heading compact-heading">
+            <h3>Home address</h3>
+          </div>
+
+          <label>
+            <span>Street address <span class="required-marker" aria-label="required">*</span></span>
+            <input autocomplete="address-line1" maxlength="200" name="streetAddress" required type="text" />
+          </label>
+
+          <label>
+            <span>Suite or apartment</span>
+            <input autocomplete="address-line2" maxlength="100" name="suite" type="text" />
+          </label>
+
+          <div class="field-grid">
+            <label>
+              <span>City <span class="required-marker" aria-label="required">*</span></span>
+              <input autocomplete="address-level2" maxlength="100" name="city" required type="text" />
+            </label>
+
+            <label>
+              <span>State <span class="required-marker" aria-label="required">*</span></span>
+              <input autocomplete="address-level1" maxlength="50" name="state" required type="text" value="MI" />
+            </label>
+          </div>
+
+          <label>
+            <span>ZIP code <span class="required-marker" aria-label="required">*</span></span>
+            <input autocomplete="postal-code" maxlength="20" name="zipCode" required type="text" />
+          </label>
+
+          <p class="message error" data-error hidden role="alert"></p>
+          <button data-submit type="submit">Open parent portal</button>
+        </form>
+      </section>
+    </main>
+  `;
+
+  const form = document.querySelector("[data-parent-profile-completion]");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const submitButton = form.querySelector("[data-submit]");
+    const errorMessage = form.querySelector("[data-error]");
+    errorMessage.hidden = true;
+    submitButton.disabled = true;
+    submitButton.textContent = "Saving";
+    try {
+      const profile = await updateProfile({
+        phone: String(formData.get("phone") || "").trim(),
+        address: {
+          streetAddress: String(formData.get("streetAddress") || "").trim(),
+          suite: String(formData.get("suite") || "").trim(),
+          city: String(formData.get("city") || "").trim(),
+          state: String(formData.get("state") || "").trim(),
+          zipCode: String(formData.get("zipCode") || "").trim(),
+        },
+      });
+      renderSchoolDashboard({
+        role: "PARENT",
+        school,
+        user: { ...response.user, phone: profile.phone },
+        onLogout: () => {
+          localStorage.removeItem("schooldays.accessToken");
+          returnToLoginPage();
+        },
+      });
+    } catch (error) {
+      errorMessage.textContent = error instanceof Error ? error.message : "Unable to save parent profile";
+      errorMessage.hidden = false;
+      submitButton.disabled = false;
+      submitButton.textContent = "Open parent portal";
+    }
   });
 }
 

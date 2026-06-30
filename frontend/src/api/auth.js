@@ -12,9 +12,17 @@ export function requestParentRegistrationLink({ tenantId, email }) {
   return apiPost("/api/auth/request-parent-registration-link", { tenantId, email }, { auth: false });
 }
 
+export function getAuthConfig() {
+  return apiGet("/api/auth/config", { auth: false });
+}
+
 export function startGoogleRegistration({ tenantId }) {
   const params = new URLSearchParams({ tenantId });
   return apiGet(`/api/auth/google/start?${params.toString()}`, { auth: false });
+}
+
+export function getCurrentAuthUser() {
+  return apiGet("/api/auth/me");
 }
 
 export function acceptTenantInvitation(request) {

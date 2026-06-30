@@ -18,6 +18,30 @@ public record UpdateProfileRequest(
 
         @NotBlank
         @Size(max = 50)
-        String phone
+        String phone,
+
+        ParentAddress address
 ) {
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    public record ParentAddress(
+            @NotBlank
+            @Size(max = 200)
+            String streetAddress,
+
+            @Size(max = 100)
+            String suite,
+
+            @NotBlank
+            @Size(max = 100)
+            String city,
+
+            @NotBlank
+            @Size(max = 50)
+            String state,
+
+            @NotBlank
+            @Size(max = 20)
+            String zipCode
+    ) {
+    }
 }

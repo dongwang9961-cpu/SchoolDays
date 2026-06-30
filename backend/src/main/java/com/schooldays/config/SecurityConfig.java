@@ -52,6 +52,7 @@ public class SecurityConfig {
                                 "/api/auth/request-self-service-registration-link",
                                 "/api/auth/complete-registration",
                                 "/api/auth/register/complete",
+                                "/api/auth/config",
                                 "/api/auth/google/start",
                                 "/api/auth/google/callback",
                                 "/api/oauth/google/gmail/callback",

@@ -2412,7 +2412,12 @@ function enrollmentModal(classRecord, children, pricing, enrollments, loadingPri
               </div>
             </fieldset>
 
-            <fieldset class="checkbox-field" data-enrollment-payment-methods ${requiredFeeTotal > 0 ? "" : "hidden"}>
+            <fieldset
+              class="checkbox-field"
+              data-enrollment-payment-methods
+              data-payment-touched="${requiredFeeTotal > 0 ? "true" : "false"}"
+              ${requiredFeeTotal > 0 ? "" : "hidden"}
+            >
               <legend>Payment</legend>
               <div class="checkbox-grid two-column-checkbox-grid">
                 <label class="checkbox-option">
@@ -3727,6 +3732,19 @@ function initializeEnrollmentWizard(root) {
     paymentInputs.forEach((input) => {
       input.disabled = !hasSelectedFee;
     });
+    if (hasSelectedFee && paymentMethods.dataset.paymentTouched !== "true") {
+      const onlineInput = paymentInputs.find((input) => input.value === "online");
+      if (onlineInput) {
+        onlineInput.checked = true;
+      }
+    }
+    if (!hasSelectedFee) {
+      paymentMethods.dataset.paymentTouched = "false";
+      const skipInput = paymentInputs.find((input) => input.value === "skip");
+      if (skipInput) {
+        skipInput.checked = true;
+      }
+    }
     syncReview();
   };
   const sync = () => {
@@ -3763,7 +3781,12 @@ function initializeEnrollmentWizard(root) {
   });
   backButton?.addEventListener("click", () => goToStep(currentStep() - 1));
   feeInputs.forEach((input) => input.addEventListener("change", syncPaymentMethods));
-  paymentInputs.forEach((input) => input.addEventListener("change", syncReview));
+  paymentInputs.forEach((input) => input.addEventListener("change", () => {
+    if (paymentMethods) {
+      paymentMethods.dataset.paymentTouched = "true";
+    }
+    syncReview();
+  }));
   sync();
 }
 
