@@ -25,3 +25,11 @@ export function closeClassEnrollment(tenantId, classId) {
 export function stopClass(tenantId, classId) {
   return apiPost(`/api/tenants/${tenantId}/classes/${classId}/stop`, {});
 }
+
+export function listClassTeachers(tenantId, classId) {
+  return apiGet(`/api/tenants/${tenantId}/classes/${classId}/teachers`);
+}
+
+export function assignClassTeacher(tenantId, classId, request) {
+  return apiPost(`/api/tenants/${tenantId}/classes/${classId}/teachers`, request);
+}

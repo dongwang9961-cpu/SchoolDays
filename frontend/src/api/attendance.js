@@ -13,3 +13,7 @@ export function listChildAttendance(tenantId, childId) {
 export function checkInAttendance(request) {
   return apiPost("/api/attendance/check-in", request);
 }
+
+export function getClassAttendanceGrid(tenantId, classId) {
+  return apiGet(`/api/tenants/${tenantId}/classes/${classId}/attendance-grid`);
+}

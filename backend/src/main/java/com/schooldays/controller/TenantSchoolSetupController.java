@@ -18,10 +18,12 @@ import com.schooldays.dto.site.CreateSiteRequest;
 import com.schooldays.dto.site.SiteListResponse;
 import com.schooldays.dto.site.SiteResponse;
 import com.schooldays.dto.site.UpdateSiteRequest;
+import com.schooldays.dto.student.StudentRosterResponse;
 import com.schooldays.service.classroom.ClassService;
 import com.schooldays.service.pricing.ClassPricingService;
 import com.schooldays.service.program.ProgramService;
 import com.schooldays.service.site.SiteService;
+import com.schooldays.service.student.StudentRosterService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -42,17 +44,20 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     private final ProgramService programService;
     private final ClassService classService;
     private final ClassPricingService classPricingService;
+    private final StudentRosterService studentRosterService;
 
     public TenantSchoolSetupController(
             SiteService siteService,
             ProgramService programService,
             ClassService classService,
-            ClassPricingService classPricingService
+            ClassPricingService classPricingService,
+            StudentRosterService studentRosterService
     ) {
         this.siteService = siteService;
         this.programService = programService;
         this.classService = classService;
         this.classPricingService = classPricingService;
+        this.studentRosterService = studentRosterService;
     }
 
     @GetMapping("/sites")
@@ -115,6 +120,15 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             @RequestParam("siteId") UUID siteId
     ) {
         return ResponseEntity.ok(classService.listClasses(tenantId, siteId));
+    }
+
+    @GetMapping("/students")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<StudentRosterResponse> listStudents(
+            @PathVariable("tenantId") UUID tenantId,
+            @RequestParam(value = "classId", required = false) UUID classId
+    ) {
+        return ResponseEntity.ok(studentRosterService.listActiveClassStudents(tenantId, classId));
     }
 
     @PostMapping("/classes")

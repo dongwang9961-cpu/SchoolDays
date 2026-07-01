@@ -4,6 +4,9 @@ import static com.schooldays.jooq.generated.tables.Attendance.ATTENDANCE;
 import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
 import static com.schooldays.jooq.generated.tables.Children.CHILDREN;
 import static com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS;
+import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
+import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
+import static com.schooldays.jooq.generated.tables.Users.USERS;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -43,6 +46,23 @@ public class AttendanceDao {
                 .where(CLASSES.TENANT_ID.eq(tenantId))
                 .and(CLASSES.ID.eq(classId))
                 .and(CLASSES.STATUS.eq("active"))
+                .fetchOptional();
+    }
+
+    public Optional<String> findClassTimezone(UUID tenantId, UUID classId) {
+        return dsl.select(SCHOOL_SITES.TIMEZONE)
+                .from(CLASSES)
+                .join(PROGRAMS).on(PROGRAMS.ID.eq(CLASSES.PROGRAM_ID))
+                .join(SCHOOL_SITES).on(SCHOOL_SITES.ID.eq(PROGRAMS.SITE_ID))
+                .where(CLASSES.TENANT_ID.eq(tenantId))
+                .and(CLASSES.ID.eq(classId))
+                .fetchOptional(SCHOOL_SITES.TIMEZONE);
+    }
+
+    public Optional<ClassesRecord> findClass(UUID tenantId, UUID classId) {
+        return dsl.selectFrom(CLASSES)
+                .where(CLASSES.TENANT_ID.eq(tenantId))
+                .and(CLASSES.ID.eq(classId))
                 .fetchOptional();
     }
 
@@ -114,6 +134,35 @@ public class AttendanceDao {
         return listAttendanceWhere(
                 ATTENDANCE.CLASS_ID.eq(classId),
                 ATTENDANCE.CLASS_DATE.eq(classDate)
+        );
+    }
+
+    public List<Record> listClassRoster(UUID tenantId, UUID classId) {
+        return dsl.select(
+                        CHILDREN.ID,
+                        CHILDREN.FIRST_NAME,
+                        CHILDREN.LAST_NAME,
+                        USERS.EMAIL,
+                        USERS.PHONE
+                )
+                .from(ENROLLMENTS)
+                .join(CHILDREN).on(CHILDREN.ID.eq(ENROLLMENTS.CHILD_ID))
+                .join(USERS).on(USERS.ID.eq(CHILDREN.PARENT_USER_ID))
+                .where(ENROLLMENTS.TENANT_ID.eq(tenantId))
+                .and(ENROLLMENTS.CLASS_ID.eq(classId))
+                .and(ENROLLMENTS.ENROLLMENT_STATUS.notIn("cancelled", "rejected"))
+                .and(CHILDREN.STATUS.eq("active"))
+                .orderBy(CHILDREN.LAST_NAME.asc(), CHILDREN.FIRST_NAME.asc(), CHILDREN.SEQ_ID.asc())
+                .fetch()
+                .stream()
+                .map(record -> (Record) record)
+                .toList();
+    }
+
+    public List<Record> listClassAttendance(UUID tenantId, UUID classId) {
+        return listAttendanceWhere(
+                ATTENDANCE.TENANT_ID.eq(tenantId),
+                ATTENDANCE.CLASS_ID.eq(classId)
         );
     }
 

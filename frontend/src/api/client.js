@@ -59,15 +59,21 @@ export async function apiPatch(path, body, options = {}) {
 
 async function handleFailedResponse(response, options = {}) {
   const payload = await response.json().catch(() => undefined);
-  const message = payload && typeof payload.error === "string"
-    ? payload.error
-    : `Request failed with ${response.status}`;
+  const message = responseErrorMessage(payload) || `Request failed with ${response.status}`;
 
   if (response.status === 401 && options.auth !== false) {
     redirectToLogin();
   }
 
   throw new ApiError(message, response.status);
+}
+
+function responseErrorMessage(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  return [payload.detail, payload.message, payload.error, payload.title]
+    .find((value) => typeof value === "string" && value.trim()) || "";
 }
 
 function redirectToLogin() {

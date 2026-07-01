@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 import com.schooldays.dto.attendance.AttendanceCheckInRequest;
+import com.schooldays.dto.attendance.AttendanceGridResponse;
 import com.schooldays.dto.attendance.AttendanceListResponse;
 import com.schooldays.dto.attendance.AttendanceResponse;
 import com.schooldays.service.attendance.AttendanceService;
@@ -43,5 +44,14 @@ public class AttendanceController extends ApiPlaceholderSupport {
             @RequestParam LocalDate date
     ) {
         return ResponseEntity.ok(attendanceService.listClassAttendance(classId, date));
+    }
+
+    @GetMapping("/api/tenants/{tenantId}/classes/{classId}/attendance-grid")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
+    public ResponseEntity<AttendanceGridResponse> getClassAttendanceGrid(
+            @PathVariable("tenantId") UUID tenantId,
+            @PathVariable("classId") UUID classId
+    ) {
+        return ResponseEntity.ok(attendanceService.getClassAttendanceGrid(tenantId, classId));
     }
 }
