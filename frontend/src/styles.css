@@ -946,6 +946,59 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.list-filter-bar {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 6px;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-start;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+}
+
+.list-filter-bar label {
+  align-items: center;
+  color: #5f6f86;
+  display: inline-flex;
+  font-size: 0.9rem;
+  gap: 10px;
+}
+
+.list-filter-bar select {
+  background: #ffffff;
+  border: 1px solid #c8d2e4;
+  border-radius: 6px;
+  color: #22314a;
+  min-height: 38px;
+  min-width: min(320px, 70vw);
+  padding: 8px 10px;
+}
+
+.student-roster-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 0.8fr);
+}
+
+.student-roster-row > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.student-roster-row strong,
+.student-roster-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.student-roster-row span {
+  color: #5f6f86;
+  font-size: 0.9rem;
+}
+
 .enrollment-detail-row {
   border-left: 0;
   border-right: 0;
@@ -970,6 +1023,221 @@ button:disabled {
   gap: 14px;
   margin-bottom: 16px;
   padding: 16px;
+}
+
+.parent-attendance-panel {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 6px;
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.attendance-window-label {
+  align-self: start;
+  background: #eef5ff;
+  border: 1px solid #bfd5fb;
+  border-radius: 999px;
+  color: #1f5fbf;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.parent-attendance-controls {
+  display: grid;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.parent-attendance-cards {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.attendance-date-card {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 6px;
+  color: #22314a;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 8px;
+  min-height: 142px;
+  padding: 15px;
+  text-align: left;
+  width: 100%;
+}
+
+.attendance-date-card:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.attendance-date-card.is-valid {
+  background: #f8fbff;
+  border-color: #2d6cdf;
+  box-shadow: inset 0 0 0 1px rgba(45, 108, 223, 0.16);
+}
+
+.attendance-date-card.is-valid:hover {
+  background: #eef5ff;
+  box-shadow: 0 8px 22px rgba(45, 108, 223, 0.14);
+}
+
+.attendance-date-card.is-checked {
+  background: #e8f7ee;
+  border-color: #63c184;
+}
+
+.attendance-date-card.is-invalid {
+  background: #f5f7fb;
+  border-color: #c7d2e4;
+  color: #6a7890;
+}
+
+.attendance-card-label,
+.attendance-card-status {
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.attendance-date-card.is-valid .attendance-card-status {
+  color: #1f5fbf;
+}
+
+.attendance-date-card.is-checked .attendance-card-status {
+  color: #1f7a3d;
+}
+
+.attendance-date-card.is-invalid .attendance-card-status {
+  color: #8a5a00;
+}
+
+.attendance-date-card strong {
+  color: #172033;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.attendance-date-card small {
+  color: #5f6f86;
+  line-height: 1.35;
+  min-height: 2.7em;
+  overflow-wrap: anywhere;
+}
+
+.attendance-grid-filter {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.attendance-grid-summary {
+  color: #5f6f86;
+  font-size: 0.9rem;
+}
+
+.attendance-refresh-button {
+  margin-left: auto;
+}
+
+.attendance-refresh-button + .attendance-view-switch {
+  margin-left: 0;
+}
+
+.attendance-view-switch {
+  background: #eef2f8;
+  border: 1px solid #c7d2e4;
+  border-radius: 6px;
+  display: inline-flex;
+  margin-left: auto;
+  padding: 3px;
+}
+
+.attendance-view-switch button {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: #4d5d73;
+  font-size: 0.88rem;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.attendance-view-switch button.is-active {
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(24, 35, 58, 0.12);
+  color: #172033;
+}
+
+.attendance-grid-shell {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.attendance-grid-shell .tabulator {
+  border: 0;
+  color: #22314a;
+  font-size: 0.9rem;
+}
+
+.attendance-grid-shell .tabulator-header {
+  border-bottom-color: #d8deeb;
+}
+
+.attendance-grid-shell .tabulator-col,
+.attendance-grid-shell .tabulator-cell {
+  border-right-color: #e6ebf3;
+}
+
+.attendance-grid-shell .tabulator-cell {
+  align-items: center;
+  display: flex;
+}
+
+.attendance-grid-shell .tabulator-cell[tabulator-field^="date_"] {
+  justify-content: center;
+}
+
+.attendance-grid-shell .tabulator-cell.is-unscheduled {
+  background: #f5f7fb;
+  color: #8a97ab;
+}
+
+.attendance-grid-shell .tabulator-cell.is-missed {
+  background: #fff3e2;
+}
+
+.attendance-grid-shell .tabulator-cell.is-checked {
+  background: #dff5e8;
+}
+
+.attendance-table-status {
+  align-items: center;
+  border-radius: 4px;
+  display: inline-flex;
+  font-size: 0.78rem;
+  justify-content: center;
+  min-height: 24px;
+  min-width: 48px;
+}
+
+.attendance-table-status.is-missed {
+  color: #9b5b00;
+}
+
+.attendance-table-status.is-checked {
+  color: #1f7a3d;
+  font-weight: 700;
 }
 
 .attendance-calendar-legend {
@@ -1001,6 +1269,10 @@ button:disabled {
 
 .calendar-key.scheduled {
   background: #f8fbff;
+}
+
+.calendar-key.unscheduled {
+  background: #f5f7fb;
 }
 
 .calendar-key.missed {
@@ -1069,6 +1341,10 @@ button:disabled {
   color: #8a97ab;
 }
 
+.calendar-day.is-scheduled {
+  background: #f8fbff;
+}
+
 .calendar-day.is-missed {
   background: #fff3e2;
   border-color: #e7a448;
@@ -1077,6 +1353,11 @@ button:disabled {
 .calendar-day.is-checked {
   background: #dff5e8;
   border-color: #63c184;
+}
+
+.admin-attendance-calendar .calendar-day small {
+  color: #22314a;
+  font-weight: 800;
 }
 
 .site-management-row {
@@ -1139,6 +1420,105 @@ button:disabled {
   padding: 0;
   text-align: left;
   width: 100%;
+}
+
+.class-management-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.class-management-header {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.class-management-header h3 {
+  color: #18233a;
+  font-size: 1.35rem;
+  margin: 12px 0 6px;
+}
+
+.class-management-header p {
+  color: #5f6f86;
+  margin: 0;
+}
+
+.status-pill {
+  background: #eef5ff;
+  border: 1px solid #bfd5fb;
+  border-radius: 999px;
+  color: #1f5fbf;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.class-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.danger-text-button {
+  border-color: #f0b5ae;
+  color: #b42318;
+}
+
+.class-detail-grid {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 6px;
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  overflow: hidden;
+}
+
+.class-detail-grid > div {
+  border-bottom: 1px solid #e6ebf3;
+  border-right: 1px solid #e6ebf3;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.class-detail-grid > div.is-wide {
+  grid-column: 1 / -1;
+}
+
+.class-detail-grid dt {
+  color: #5f6f86;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.class-detail-grid dd {
+  color: #22314a;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.assigned-teachers-section {
+  display: grid;
+  gap: 10px;
+}
+
+.assigned-teacher-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 0.8fr) auto;
+}
+
+.assigned-teacher-row strong,
+.assigned-teacher-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .row-actions {
@@ -1291,6 +1671,26 @@ button:disabled {
   }
 
   .enrollment-row {
+    grid-template-columns: 1fr;
+  }
+
+  .student-roster-row {
+    grid-template-columns: 1fr;
+  }
+
+  .parent-attendance-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .class-management-header {
+    display: grid;
+  }
+
+  .class-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .assigned-teacher-row {
     grid-template-columns: 1fr;
   }
 

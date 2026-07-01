@@ -9,8 +9,12 @@ import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 import static com.schooldays.jooq.generated.tables.Tenants.TENANTS;
 import static com.schooldays.jooq.generated.tables.Users.USERS;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.UUID;
 
 import com.schooldays.dao.attendance.AttendanceDao;
@@ -25,12 +29,17 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 
 class AttendanceServiceTests {
 
     private static EmbeddedPostgres postgres;
     private static DSLContext dsl;
     private static AttendanceService attendanceService;
+    private static final Clock TEST_CLOCK = Clock.fixed(
+            Instant.parse("2026-07-15T14:00:00Z"),
+            ZoneId.of("America/Detroit")
+    );
 
     private UUID tenantId;
     private UUID parentUserId;
@@ -48,7 +57,7 @@ class AttendanceServiceTests {
                 .load()
                 .migrate();
         dsl = DSL.using(postgres.getPostgresDatabase(), SQLDialect.POSTGRES);
-        attendanceService = new AttendanceService(new AttendanceDao(dsl));
+        attendanceService = new AttendanceService(new AttendanceDao(dsl), TEST_CLOCK);
     }
 
     @AfterAll
@@ -159,15 +168,69 @@ class AttendanceServiceTests {
     }
 
     @Test
+    void classAttendanceGridIncludesRosterDatesAndCheckIns() {
+        attendanceService.parentCheckIn(
+                parentUserId,
+                new AttendanceCheckInRequest(tenantId, childId, classId, LocalDate.parse("2026-07-15"))
+        );
+
+        var response = attendanceService.getClassAttendanceGrid(tenantId, classId);
+
+        assertThat(response.classRecord().id()).isEqualTo(classId);
+        assertThat(response.dates()).hasSize(31);
+        assertThat(response.dates())
+                .filteredOn(date -> date.classDate().equals(LocalDate.parse("2026-07-01")))
+                .singleElement()
+                .extracting("scheduled")
+                .isEqualTo(true);
+        assertThat(response.dates())
+                .filteredOn(date -> date.classDate().equals(LocalDate.parse("2026-07-02")))
+                .singleElement()
+                .extracting("scheduled")
+                .isEqualTo(false);
+        assertThat(response.students())
+                .singleElement()
+                .satisfies(student -> {
+                    assertThat(student.childId()).isEqualTo(childId);
+                    assertThat(student.childName()).isEqualTo("Avery Wang");
+                    assertThat(student.attendance())
+                            .filteredOn(cell -> cell.classDate().equals(LocalDate.parse("2026-07-15")))
+                            .singleElement()
+                            .satisfies(cell -> {
+                                assertThat(cell.scheduled()).isTrue();
+                                assertThat(cell.checkedIn()).isTrue();
+                                assertThat(cell.status()).isEqualTo("checked_in");
+                            });
+                });
+    }
+
+    @Test
     void parentCannotCheckInOnDateWithoutScheduledClass() {
-        org.junit.jupiter.api.Assertions.assertThrows(
-                org.springframework.web.server.ResponseStatusException.class,
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
                 () -> attendanceService.parentCheckIn(
                         parentUserId,
                         new AttendanceCheckInRequest(tenantId, childId, classId, LocalDate.parse("2026-07-16"))
                 )
         );
 
+        assertThat(exception.getReason())
+                .isEqualTo("Morning Art does not meet on Thursday, July 16, 2026. Scheduled days are Monday and Wednesday.");
+        assertThat(dsl.fetchCount(ATTENDANCE)).isZero();
+    }
+
+    @Test
+    void parentCannotCheckInOutsideYesterdayTodayTomorrowWindow() {
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> attendanceService.parentCheckIn(
+                        parentUserId,
+                        new AttendanceCheckInRequest(tenantId, childId, classId, LocalDate.parse("2026-07-22"))
+                )
+        );
+
+        assertThat(exception.getReason())
+                .isEqualTo("Parents can only check in for yesterday, today, or tomorrow (July 14, 2026 to July 16, 2026).");
         assertThat(dsl.fetchCount(ATTENDANCE)).isZero();
     }
 }

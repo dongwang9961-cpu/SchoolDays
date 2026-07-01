@@ -1,12 +1,13 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
-import { checkInAttendance, listParentAttendance } from "./api/attendance.js";
+import { checkInAttendance, getClassAttendanceGrid, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
-import { closeClassEnrollment, createClass, listAvailableClasses, listClasses, stopClass, updateClass } from "./api/classes.js";
+import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, stopClass, updateClass } from "./api/classes.js";
 import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
 import { getClassPricing, getTenantClassPricing, saveClassPricing } from "./api/pricing.js";
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
 import { createSite, listSites, updateSite } from "./api/sites.js";
+import { listStudents } from "./api/students.js";
 import {
   listNotificationHistory,
   listNotificationProviders,
@@ -15,6 +16,7 @@ import {
 } from "./api/notifications.js";
 
 let googlePlacesPromise;
+let tabulatorPromise;
 
 const schoolAdminManagementSections = [
   {
@@ -53,6 +55,14 @@ const schoolAdminSiteSections = [
     rows: ["No classes have been created for this site yet."],
   },
   {
+    id: "students",
+    label: "Students",
+    title: "Students",
+    summary: "Review students enrolled in active classes, or filter the roster by class.",
+    actions: [],
+    rows: ["No active-class students loaded yet."],
+  },
+  {
     id: "teachers",
     label: "Class Teachers",
     title: "Class Teachers",
@@ -80,8 +90,8 @@ const schoolAdminSiteSections = [
     id: "attendance",
     label: "Attendance",
     title: "Attendance",
-    summary: "Review class attendance and check in students when needed.",
-    actions: ["Open class attendance", "Check in student"],
+    summary: "Review each class attendance grid across the full class date range.",
+    actions: [],
     rows: ["No attendance records loaded yet."],
   },
   {
@@ -183,7 +193,7 @@ const parentSections = [
     label: "Attendance",
     title: "Attendance",
     summary: "Check in children and review attendance history.",
-    actions: ["Check in child"],
+    actions: [],
     rows: ["No attendance records loaded yet."],
   },
 ];
@@ -229,6 +239,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let selectedClassPricing = null;
   let loadingClasses = false;
   let loadingClassPricing = false;
+  let classTeachers = [];
+  let loadingClassTeachers = false;
+  let students = [];
+  let selectedStudentClassId = "";
+  let loadingStudents = false;
   let notificationProviders = [];
   let notificationHistory = [];
   let loadingNotifications = false;
@@ -240,6 +255,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let selectedEnrollmentId = "";
   let loadingEnrollments = false;
   let attendanceRecords = [];
+  let attendanceGrid = null;
+  let selectedAttendanceClassId = "";
+  let selectedAttendanceTarget = "";
+  let adminAttendanceView = "table";
   let loadingAttendance = false;
   let enrollmentModalOpen = false;
   let enrollmentPricing = null;
@@ -285,9 +304,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     const currentSite = selectedSite();
     const title = role === "SCHOOL_ADMIN" && adminMode === "site" && currentSite ? currentSite.name : dashboard.label;
     const notificationModalOpen = activeOperation && isNotificationOperation(activeOperation);
-    const activeOperationPanel = parentAttendanceOperation(activeSection, activeOperation)
-      ? parentAttendancePanel()
-      : activeOperation && !notificationModalOpen
+    const activeOperationPanel = activeOperation && !notificationModalOpen
         ? operationPanel(activeSection, activeOperation, selectedSite(), selectedProgram(), selectedClass(), selectedChild(), selectedClassPricing, user, sites, programs, classes, loadingClassPricing)
         : "";
 
@@ -371,15 +388,23 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         if (activeSectionId === "classes") {
           loadClasses();
         }
+        if (activeSectionId === "students") {
+          loadClasses();
+          loadStudents();
+        }
         if (activeSectionId === "enrollments") {
           loadEnrollments();
           loadAttendance();
         }
         if (activeSectionId === "attendance") {
-          loadChildren();
-          loadClasses();
-          loadEnrollments();
-          loadAttendance();
+          if (role === "PARENT") {
+            loadChildren();
+            loadClasses();
+            loadEnrollments();
+            loadAttendance();
+          } else if (role === "SCHOOL_ADMIN") {
+            loadClasses();
+          }
         }
         if (activeSectionId === "payments") {
           loadClasses();
@@ -543,7 +568,19 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     });
     root.querySelector("[data-enrollment-cancel]")?.addEventListener("click", closeEnrollmentModal);
     root.querySelector("[data-enrollment-form]")?.addEventListener("submit", handleEnrollmentSubmit);
-    root.querySelector("[data-attendance-form]")?.addEventListener("submit", handleAttendanceSubmit);
+    root.querySelector("[data-parent-attendance-target]")?.addEventListener("change", (event) => {
+      selectedAttendanceTarget = event.currentTarget.value;
+      const [childId] = selectedAttendanceTarget.split("|");
+      selectedChildId = childId || selectedChildId;
+      notice = "";
+      error = "";
+      render();
+    });
+    root.querySelectorAll("[data-parent-attendance-date]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await handleParentAttendanceCardClick(button);
+      });
+    });
 
     root.querySelector("[data-operation-form]")?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -626,13 +663,24 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       button.addEventListener("click", () => {
         selectedClassId = button.dataset.classId;
         selectedClassPricing = null;
+        classTeachers = [];
         notice = "";
         error = "";
         render();
+        loadClassTeachers();
         if (isPricingOperation(activeOperation)) {
           loadSelectedClassPricing();
         }
       });
+    });
+    root.querySelector("[data-class-detail-back]")?.addEventListener("click", () => {
+      selectedClassId = "";
+      selectedClassPricing = null;
+      classTeachers = [];
+      activeOperation = "";
+      notice = "";
+      error = "";
+      render();
     });
     root.querySelectorAll("[data-class-edit-id]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -655,6 +703,12 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         loadSelectedClassPricing();
       });
     });
+    root.querySelector("[data-class-assign-teacher]")?.addEventListener("click", () => {
+      activeOperation = "Assign teacher";
+      notice = "";
+      error = "";
+      render();
+    });
     root.querySelectorAll("[data-class-public-link-id]").forEach((button) => {
       button.addEventListener("click", async () => {
         selectedClassId = button.dataset.classPublicLinkId;
@@ -669,6 +723,29 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     root.querySelectorAll("[data-class-stop-id]").forEach((button) => {
       button.addEventListener("click", async () => {
         await stopSelectedClass(button.dataset.classStopId);
+      });
+    });
+    root.querySelector("[data-student-class-filter]")?.addEventListener("change", (event) => {
+      selectedStudentClassId = event.currentTarget.value;
+      students = [];
+      render();
+      loadStudents();
+    });
+    root.querySelector("[data-attendance-class-filter]")?.addEventListener("change", (event) => {
+      selectedAttendanceClassId = event.currentTarget.value;
+      attendanceGrid = null;
+      render();
+      loadAttendanceGrid();
+    });
+    root.querySelector("[data-attendance-refresh]")?.addEventListener("click", () => {
+      attendanceGrid = null;
+      render();
+      loadAttendanceGrid();
+    });
+    root.querySelectorAll("[data-attendance-view]").forEach((button) => {
+      button.addEventListener("click", () => {
+        adminAttendanceView = button.dataset.attendanceView === "calendar" ? "calendar" : "table";
+        render();
       });
     });
     root.querySelectorAll("[data-class-enroll-id]").forEach((button) => {
@@ -711,6 +788,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     });
 
     initializeGooglePlacesAutocomplete(root);
+    initializeAttendanceGridTable(root);
     root.querySelector("[data-gmail-connect]")?.addEventListener("click", connectGmail);
   }
 
@@ -1025,6 +1103,21 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         return;
       }
 
+      if (isAssignTeacherOperation(action)) {
+        const classRecord = selectedClass();
+        if (!classRecord) {
+          throw new Error("Select a class before assigning a teacher.");
+        }
+        const formData = new FormData(form);
+        await assignClassTeacher(school.tenantId, classRecord.id, { email: formData.get("email") });
+        notice = "Teacher assigned to the class.";
+        error = "";
+        activeOperation = "";
+        render();
+        await loadClassTeachers();
+        return;
+      }
+
       if (isNotificationOperation(action)) {
         const formData = new FormData(form);
         if (!window.confirm("Send this email to every BCC recipient?")) {
@@ -1100,6 +1193,12 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       }
       return classRows || ["No classes have been created for this site yet."];
     }
+    if (section.id === "students" && role === "SCHOOL_ADMIN") {
+      if (loadingStudents) {
+        return ["Loading students..."];
+      }
+      return students.length ? [] : ["No students are enrolled in active classes yet."];
+    }
     if (section.id === "children") {
       if (loadingChildren && childRows === null) {
         return ["Loading children..."];
@@ -1117,6 +1216,15 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         return ["Loading attendance..."];
       }
       return attendanceRecords.length ? [] : ["No attendance records yet."];
+    }
+    if (section.id === "attendance" && role === "SCHOOL_ADMIN") {
+      if (loadingClasses || loadingAttendance) {
+        return ["Loading class attendance..."];
+      }
+      if (!classes.length) {
+        return ["No classes have been created for this site yet."];
+      }
+      return attendanceGrid ? [] : ["Choose a class to load attendance."];
     }
     if (section.id === "payments" && role === "PARENT") {
       if (loadingEnrollments) {
@@ -1209,6 +1317,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       `;
     }
     if (section.id === "classes" && classes.length) {
+      if (role === "SCHOOL_ADMIN" && selectedClass()) {
+        return classManagementView(selectedClass());
+      }
       return `
         <div class="data-list" role="listbox" aria-label="Classes">
           ${classes
@@ -1239,55 +1350,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                       </button>
                     </div>
                   ` : `
-                    <div class="row-actions">
-                      <button
-                        aria-label="Edit ${escapeHtml(classRecord.name)}"
-                        class="icon-button subtle-icon-button"
-                        data-class-edit-id="${escapeHtml(classRecord.id)}"
-                        title="Edit class"
-                        type="button"
-                      >
-                        ✎
-                      </button>
-                      <button
-                        aria-label="Configure pricing for ${escapeHtml(classRecord.name)}"
-                        class="icon-button subtle-icon-button"
-                        data-class-pricing-id="${escapeHtml(classRecord.id)}"
-                        title="Configure pricing"
-                        type="button"
-                      >
-                        $
-                      </button>
-                      <button
-                        aria-label="Copy public link for ${escapeHtml(classRecord.name)}"
-                        class="icon-button subtle-icon-button"
-                        data-class-public-link-id="${escapeHtml(classRecord.id)}"
-                        title="Copy public link"
-                        type="button"
-                      >
-                        ↗
-                      </button>
-                      <button
-                        aria-label="Close enrollment for ${escapeHtml(classRecord.name)}"
-                        class="icon-button subtle-icon-button"
-                        data-class-close-enrollment-id="${escapeHtml(classRecord.id)}"
-                        title="Close enrollment"
-                        type="button"
-                        ${isEnrollmentClosed(classRecord) ? "disabled" : ""}
-                      >
-                        ⊘
-                      </button>
-                      <button
-                        aria-label="Stop ${escapeHtml(classRecord.name)}"
-                        class="icon-button subtle-icon-button danger-icon-button"
-                        data-class-stop-id="${escapeHtml(classRecord.id)}"
-                        title="Stop class"
-                        type="button"
-                        ${String(classRecord.status || "").toLowerCase() === "stopped" ? "disabled" : ""}
-                      >
-                        ■
-                      </button>
-                    </div>
+                    <span class="row-muted-label">Manage</span>
                   `}
                 </div>
               `
@@ -1295,6 +1358,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             .join("")}
         </div>
       `;
+    }
+    if (section.id === "students" && role === "SCHOOL_ADMIN") {
+      return studentRosterList(rows);
     }
     if (section.id === "notifications") {
       return notificationList(rows);
@@ -1331,6 +1397,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
     if (section.id === "attendance" && role === "PARENT") {
       return attendanceList(rows);
+    }
+    if (section.id === "attendance" && role === "SCHOOL_ADMIN") {
+      return adminAttendanceGrid(rows);
     }
     if (section.id === "payments" && role === "PARENT") {
       return parentPaymentList(rows);
@@ -1370,6 +1439,153 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                 .join("")
             : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
         }
+      </div>
+    `;
+  }
+
+  function studentRosterList(rows) {
+    const activeClasses = classes.filter((classRecord) => String(classRecord.status || "").toLowerCase() === "active");
+    return `
+      <div class="list-filter-bar">
+        <label>
+          <span>Class</span>
+          <select data-student-class-filter>
+            <option value="">All active classes</option>
+            ${activeClasses.map((classRecord) => `
+              <option value="${escapeHtml(classRecord.id)}" ${selectedStudentClassId === classRecord.id ? "selected" : ""}>
+                ${escapeHtml(classRecord.name)}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+      </div>
+      <div class="data-list student-roster-list" aria-label="Students">
+        ${
+          students.length
+            ? students.map((student) => {
+                const classCount = Number(student.classCount || 1);
+                const enrollmentSummary = classCount > 1
+                  ? `${classCount} active enrollments`
+                  : `${statusLabel(student.enrollmentStatus || "enrolled")} enrollment`;
+                const classStatus = classCount > 1 ? "Active classes" : (student.classStatus || "active");
+                const enrolledAt = student.enrolledAt ? formatDate(student.enrolledAt) : "";
+                const enrollmentDate = enrolledAt
+                  ? `${classCount > 1 ? "Latest enrollment" : "Enrolled"} ${enrolledAt}`
+                  : "Enrollment date unavailable";
+                return `
+                <div class="data-row student-roster-row">
+                  <div>
+                    <strong>${escapeHtml(student.childName || "Student")}</strong>
+                    <span>${escapeHtml(student.dateOfBirth ? `DOB ${formatDate(student.dateOfBirth)}` : "Student profile")}</span>
+                  </div>
+                  <div>
+                    <strong>${escapeHtml(student.className || "Class")}</strong>
+                    <span>${escapeHtml(enrollmentSummary)}</span>
+                  </div>
+                  <div>
+                    <strong>${escapeHtml(student.parentEmail || "Parent email unavailable")}</strong>
+                    <span>${escapeHtml(student.parentPhone || "Phone unavailable")}</span>
+                  </div>
+                  <div>
+                    <strong>${escapeHtml(classStatus)}</strong>
+                    <span>${escapeHtml(enrollmentDate)}</span>
+                  </div>
+                </div>
+              `;
+              }).join("")
+            : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
+        }
+      </div>
+    `;
+  }
+
+  function classManagementView(classRecord) {
+    const stopped = String(classRecord.status || "").toLowerCase() === "stopped";
+    const enrollmentClosed = isEnrollmentClosed(classRecord);
+    const registrationStatus = classRecord.registrationClosesAt
+      ? `Closed ${new Date(classRecord.registrationClosesAt).toLocaleString()}`
+      : "Open";
+    return `
+      <section class="class-management-panel" aria-label="${escapeHtml(classRecord.name)} management">
+        <div class="class-management-header">
+          <div>
+            <button class="secondary-button compact-button back-button" data-class-detail-back type="button">Back to classes</button>
+            <h3>${escapeHtml(classRecord.name)}</h3>
+            <p>${escapeHtml(`${programName(classRecord.programId)} - ${classScheduleText(classRecord)}`)}</p>
+          </div>
+          <span class="status-pill">${escapeHtml(statusLabel(classRecord.status || "active"))}</span>
+        </div>
+
+        <div class="class-management-actions" aria-label="Class management actions">
+          <button class="secondary-button compact-button" data-class-edit-id="${escapeHtml(classRecord.id)}" type="button">Modify</button>
+          <button class="secondary-button compact-button" data-class-pricing-id="${escapeHtml(classRecord.id)}" type="button">Configure price</button>
+          <button class="secondary-button compact-button" data-class-public-link-id="${escapeHtml(classRecord.id)}" type="button">Copy public link</button>
+          <button class="secondary-button compact-button" data-class-assign-teacher type="button">Assign teacher</button>
+          <button
+            class="secondary-button compact-button"
+            data-class-close-enrollment-id="${escapeHtml(classRecord.id)}"
+            type="button"
+            ${enrollmentClosed ? "disabled" : ""}
+          >
+            Close enrollment
+          </button>
+          <button
+            class="secondary-button compact-button danger-text-button"
+            data-class-stop-id="${escapeHtml(classRecord.id)}"
+            type="button"
+            ${stopped ? "disabled" : ""}
+          >
+            Stop class
+          </button>
+        </div>
+
+        <dl class="class-detail-grid">
+          ${classDetailItem("Program", programName(classRecord.programId))}
+          ${classDetailItem("Date range", enrollmentDateRange(classRecord))}
+          ${classDetailItem("Schedule", classScheduleText(classRecord))}
+          ${classDetailItem("Capacity", classRecord.capacity ? String(classRecord.capacity) : "No capacity set")}
+          ${classDetailItem("Enrollment", registrationStatus)}
+          ${classDetailItem("Class type", classRecord.classType === "time_range" ? "Time range" : "Weekly")}
+          ${classRecord.description ? classDetailItem("Description", classRecord.description, true) : ""}
+        </dl>
+
+        <section class="assigned-teachers-section">
+          <div class="workspace-heading">
+            <h3>Assigned teachers</h3>
+            <p>${escapeHtml(loadingClassTeachers ? "Loading teachers..." : `${classTeachers.length} assigned teacher${classTeachers.length === 1 ? "" : "s"}.`)}</p>
+          </div>
+          ${assignedTeachersList()}
+        </section>
+      </section>
+    `;
+  }
+
+  function classDetailItem(label, value, wide = false) {
+    return `
+      <div class="${wide ? "is-wide" : ""}">
+        <dt>${escapeHtml(label)}</dt>
+        <dd>${escapeHtml(value || "Unavailable")}</dd>
+      </div>
+    `;
+  }
+
+  function assignedTeachersList() {
+    if (loadingClassTeachers) {
+      return `<div class="data-list"><div class="data-row">Loading assigned teachers...</div></div>`;
+    }
+    if (!classTeachers.length) {
+      return `<div class="data-list"><div class="data-row">No teachers assigned yet.</div></div>`;
+    }
+    return `
+      <div class="data-list assigned-teachers-list" aria-label="Assigned teachers">
+        ${classTeachers.map((teacher) => `
+          <div class="data-row assigned-teacher-row">
+            <strong>${escapeHtml(teacherName(teacher))}</strong>
+            <span>${escapeHtml(teacher.email || "Email unavailable")}</span>
+            <span>${escapeHtml(teacher.phone || "Phone unavailable")}</span>
+            <span>${escapeHtml(statusLabel(teacher.status || "active"))}</span>
+          </div>
+        `).join("")}
       </div>
     `;
   }
@@ -1578,6 +1794,20 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     return true;
   }
 
+  function attendanceDateMessage(classRecord, dateValue) {
+    if (!classRecord) {
+      return "";
+    }
+    if (classRecord.startDate && classRecord.endDate && (dateValue < classRecord.startDate || dateValue > classRecord.endDate)) {
+      return `${classRecord.name} runs from ${formatDate(classRecord.startDate)} to ${formatDate(classRecord.endDate)}. Choose a date in that range.`;
+    }
+    if (classRecord.classType === "weekly" && classRecord.weekdays?.length && !isScheduledClassDate(classRecord, dateValue)) {
+      const weekday = dateFromLocalValue(dateValue).toLocaleDateString("en-US", { weekday: "long" });
+      return `${classRecord.name} does not meet on ${weekday}. Scheduled days are ${formatWeekdayList(classRecord.weekdays)}.`;
+    }
+    return "";
+  }
+
   function parentPaymentList(rows) {
     const pending = pendingPaymentEnrollments();
     return `
@@ -1617,8 +1847,276 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     return enrollments.filter((enrollment) => String(enrollment.status || "").toLowerCase() === "pending_payment");
   }
 
+  function adminAttendanceGrid(rows) {
+    const currentView = adminAttendanceView === "calendar" ? "calendar" : "table";
+    return `
+      <div class="list-filter-bar attendance-grid-filter">
+        <label>
+          <span>Class</span>
+          <select data-attendance-class-filter ${classes.length ? "" : "disabled"}>
+            ${
+              classes.length
+                ? classes.map((classRecord) => `
+                  <option value="${escapeHtml(classRecord.id)}" ${selectedAttendanceClassId === classRecord.id ? "selected" : ""}>
+                    ${escapeHtml(classRecord.name)}
+                  </option>
+                `).join("")
+                : `<option value="">No classes available</option>`
+            }
+          </select>
+        </label>
+        ${attendanceGrid ? attendanceGridSummary(attendanceGrid) : ""}
+        <button
+          class="secondary-button compact-button attendance-refresh-button"
+          data-attendance-refresh
+          type="button"
+          ${selectedAttendanceClassId && !loadingAttendance ? "" : "disabled"}
+        >
+          Refresh
+        </button>
+        ${
+          attendanceGrid
+            ? `<div class="attendance-view-switch" role="group" aria-label="Attendance view">
+                <button
+                  aria-pressed="${currentView === "table"}"
+                  class="${currentView === "table" ? "is-active" : ""}"
+                  data-attendance-view="table"
+                  type="button"
+                >
+                  Table
+                </button>
+                <button
+                  aria-pressed="${currentView === "calendar"}"
+                  class="${currentView === "calendar" ? "is-active" : ""}"
+                  data-attendance-view="calendar"
+                  type="button"
+                >
+                  Calendar
+                </button>
+              </div>`
+            : ""
+        }
+      </div>
+      ${
+        attendanceGrid
+          ? currentView === "calendar"
+            ? adminAttendanceCalendar(attendanceGrid)
+            : `<div class="attendance-grid-shell">
+                <div data-attendance-tabulator></div>
+              </div>`
+          : `<div class="data-list">${rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")}</div>`
+      }
+    `;
+  }
+
+  function attendanceGridSummary(grid) {
+    const scheduledCount = (grid.dates || []).filter((date) => date.scheduled).length;
+    const studentCount = (grid.students || []).length;
+    return `
+      <span class="attendance-grid-summary">
+        ${escapeHtml(`${studentCount} student${studentCount === 1 ? "" : "s"} - ${scheduledCount} scheduled day${scheduledCount === 1 ? "" : "s"}`)}
+      </span>
+    `;
+  }
+
+  function adminAttendanceCalendar(grid) {
+    const dates = grid.dates || [];
+    if (!dates.length) {
+      return `<div class="data-list"><div class="data-row">No class dates are available.</div></div>`;
+    }
+    const summariesByDate = adminAttendanceSummariesByDate(grid);
+    const firstDate = dates[0]?.classDate || grid.classRecord?.startDate;
+    const lastDate = dates[dates.length - 1]?.classDate || grid.classRecord?.endDate;
+    const months = calendarMonths(firstDate, lastDate);
+    if (!months.length) {
+      return `<div class="data-list"><div class="data-row">Class schedule dates are unavailable.</div></div>`;
+    }
+    return `
+      <section class="attendance-calendar-panel admin-attendance-calendar" aria-label="Class attendance calendar">
+        <div class="attendance-calendar-legend">
+          <span><i class="calendar-key checked"></i>Attendance</span>
+          <span><i class="calendar-key missed"></i>Missing check-ins</span>
+          <span><i class="calendar-key scheduled"></i>Scheduled</span>
+          <span><i class="calendar-key unscheduled"></i>No class</span>
+        </div>
+        <div class="attendance-calendar-months">
+          ${months.map((month) => adminAttendanceCalendarMonth(month, summariesByDate)).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function adminAttendanceSummariesByDate(grid) {
+    const summariesByDate = new Map();
+    (grid.dates || []).forEach((date) => {
+      summariesByDate.set(date.classDate, {
+        classDate: date.classDate,
+        scheduled: Boolean(date.scheduled),
+        checkedCount: 0,
+        scheduledCount: 0,
+      });
+    });
+    (grid.students || []).forEach((student) => {
+      (student.attendance || []).forEach((cell) => {
+        if (!summariesByDate.has(cell.classDate)) {
+          summariesByDate.set(cell.classDate, {
+            classDate: cell.classDate,
+            scheduled: Boolean(cell.scheduled),
+            checkedCount: 0,
+            scheduledCount: 0,
+          });
+        }
+        const summary = summariesByDate.get(cell.classDate);
+        summary.scheduled = summary.scheduled || Boolean(cell.scheduled);
+        if (cell.scheduled) {
+          summary.scheduledCount += 1;
+        }
+        if (cell.checkedIn) {
+          summary.checkedCount += 1;
+        }
+      });
+    });
+    return summariesByDate;
+  }
+
+  function adminAttendanceCalendarMonth(monthStart, summariesByDate) {
+    const monthLabel = monthStart.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    const blanks = Array.from({ length: monthStart.getDay() }, () => `<span class="calendar-day is-empty" aria-hidden="true"></span>`).join("");
+    const days = [];
+    const cursor = new Date(monthStart);
+    while (cursor.getMonth() === monthStart.getMonth()) {
+      const value = localDateValue(cursor);
+      const summary = summariesByDate.get(value);
+      const status = adminAttendanceCalendarDayStatus(summary);
+      days.push(`
+        <span class="calendar-day ${status.className}" title="${escapeHtml(adminAttendanceCalendarDayTitle(value, summary))}">
+          <strong>${cursor.getDate()}</strong>
+          <small>${escapeHtml(status.label)}</small>
+        </span>
+      `);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return `
+      <section class="attendance-calendar-month">
+        <h4>${escapeHtml(monthLabel)}</h4>
+        <div class="calendar-weekdays" aria-hidden="true">
+          ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<span>${day}</span>`).join("")}
+        </div>
+        <div class="calendar-grid">${blanks}${days.join("")}</div>
+      </section>
+    `;
+  }
+
+  function adminAttendanceCalendarDayStatus(summary) {
+    if (!summary?.scheduled) {
+      return { className: "is-unscheduled", label: "" };
+    }
+    if (!summary.scheduledCount) {
+      return { className: "is-scheduled", label: "0" };
+    }
+    if (summary.checkedCount > 0) {
+      return { className: "is-checked", label: `${summary.checkedCount}/${summary.scheduledCount}` };
+    }
+    return { className: "is-missed", label: `${summary.checkedCount}/${summary.scheduledCount}` };
+  }
+
+  function adminAttendanceCalendarDayTitle(dateValue, summary) {
+    if (!summary?.scheduled) {
+      return `${formatDate(dateValue)} - No class`;
+    }
+    if (!summary.scheduledCount) {
+      return `${formatDate(dateValue)} - Scheduled, no enrolled students`;
+    }
+    const missingCount = summary.scheduledCount - summary.checkedCount;
+    return `${formatDate(dateValue)} - ${summary.checkedCount} of ${summary.scheduledCount} checked in${missingCount ? `, ${missingCount} missing` : ""}`;
+  }
+
+  async function initializeAttendanceGridTable(renderRoot) {
+    const element = renderRoot.querySelector("[data-attendance-tabulator]");
+    if (!element || !attendanceGrid) {
+      return;
+    }
+    const Tabulator = await loadTabulator();
+    if (!element.isConnected) {
+      return;
+    }
+    const dates = attendanceGrid.dates || [];
+    const rows = (attendanceGrid.students || []).map((student) => {
+      const row = {
+        childId: student.childId,
+        childName: student.childName || "Student",
+        parentEmail: student.parentEmail || "",
+        parentPhone: student.parentPhone || "",
+      };
+      (student.attendance || []).forEach((cell) => {
+        row[attendanceDateField(cell.classDate)] = cell;
+      });
+      return row;
+    });
+    const columns = [
+      { title: "Student", field: "childName", frozen: true, headerFilter: "input", width: 180 },
+      { title: "Parent email", field: "parentEmail", frozen: true, headerFilter: "input", width: 220 },
+      { title: "Phone", field: "parentPhone", headerFilter: "input", width: 140 },
+      ...dates.map((date) => ({
+        title: attendanceDateHeader(date.classDate),
+        field: attendanceDateField(date.classDate),
+        headerSort: false,
+        hozAlign: "center",
+        width: 94,
+        formatter: attendanceGridCellFormatter,
+      })),
+    ];
+    new Tabulator(element, {
+      data: rows,
+      columns,
+      height: "520px",
+      index: "childId",
+      layout: "fitData",
+      placeholder: "No enrolled students for this class.",
+      columnDefaults: {
+        vertAlign: "middle",
+      },
+    });
+  }
+
+  function loadTabulator() {
+    if (!tabulatorPromise) {
+      tabulatorPromise = Promise.all([
+        import("tabulator-tables"),
+        import("tabulator-tables/dist/css/tabulator_simple.min.css"),
+      ]).then(([module]) => module.TabulatorFull);
+    }
+    return tabulatorPromise;
+  }
+
+  function attendanceGridCellFormatter(cell) {
+    const value = cell.getValue();
+    const element = cell.getElement();
+    element.classList.remove("is-checked", "is-missed", "is-unscheduled");
+    if (!value) {
+      element.title = "";
+      return "";
+    }
+    const label = value.checkedIn ? "Checked in" : value.scheduled ? "No check-in" : "No class";
+    const statusClass = value.checkedIn ? "is-checked" : value.scheduled ? "is-missed" : "is-unscheduled";
+    const time = value.checkedInAt ? ` at ${new Date(value.checkedInAt).toLocaleString()}` : "";
+    element.classList.add(statusClass);
+    element.title = `${cell.getRow().getData().childName} - ${formatDate(value.classDate)} - ${label}${time}`;
+    return `<span class="attendance-table-status ${statusClass}">${escapeHtml(value.checkedIn ? "In" : value.scheduled ? "-" : "")}</span>`;
+  }
+
+  function attendanceDateField(dateValue) {
+    return `date_${String(dateValue || "").replace(/-/g, "_")}`;
+  }
+
+  function attendanceDateHeader(dateValue) {
+    const date = dateFromLocalValue(dateValue);
+    return `${date.getMonth() + 1}/${date.getDate()} ${date.toLocaleDateString("en-US", { weekday: "short" })}`;
+  }
+
   function attendanceList(rows) {
     return `
+      ${parentAttendancePanel()}
       <div class="data-list" aria-label="Attendance history">
         ${
           attendanceRecords.length
@@ -1637,43 +2135,154 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   }
 
   function parentAttendancePanel() {
-    const eligibleEnrollments = enrollments
+    const eligibleEnrollments = eligibleAttendanceEnrollments();
+    const currentTarget = currentAttendanceTarget(eligibleEnrollments);
+    const currentEnrollment = eligibleEnrollments.find((enrollment) => attendanceTargetValue(enrollment) === currentTarget);
+    const currentClass = currentEnrollment ? classes.find((classRecord) => classRecord.id === currentEnrollment.classId) : null;
+    return `
+      <section class="parent-attendance-panel" aria-label="Parent attendance check-in">
+        <div class="workspace-heading workspace-heading-row">
+          <div>
+            <h3>Check in</h3>
+            <p>${escapeHtml(parentAttendancePanelSummary(eligibleEnrollments, currentEnrollment, currentClass))}</p>
+          </div>
+          <span class="attendance-window-label">Yesterday / Today / Tomorrow</span>
+        </div>
+
+        <div class="parent-attendance-controls">
+          <label>
+            <span>Child and class</span>
+            <select data-parent-attendance-target ${eligibleEnrollments.length ? "" : "disabled"}>
+              ${
+                eligibleEnrollments.length
+                  ? eligibleEnrollments.map((enrollment) => {
+                      const value = attendanceTargetValue(enrollment);
+                      return `
+                        <option value="${escapeHtml(value)}" ${value === currentTarget ? "selected" : ""}>
+                          ${escapeHtml(`${childName(enrollment.childId)} - ${className(enrollment.classId)}`)}
+                        </option>
+                      `;
+                    }).join("")
+                  : `<option value="">No enrolled children are available</option>`
+              }
+            </select>
+          </label>
+        </div>
+
+        <div class="parent-attendance-cards" aria-label="Available check-in dates">
+          ${parentAttendanceDateOptions()
+            .map((option) => parentAttendanceDateCard(option, currentEnrollment, currentClass))
+            .join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function parentAttendancePanelSummary(eligibleEnrollments, currentEnrollment, currentClass) {
+    if (loadingChildren || loadingClasses || loadingEnrollments || loadingAttendance) {
+      return "Loading attendance options.";
+    }
+    if (!eligibleEnrollments.length) {
+      return "Enroll a child in an active class before checking in.";
+    }
+    if (!currentEnrollment || !currentClass) {
+      return "Choose an enrolled child and class.";
+    }
+    return `${childName(currentEnrollment.childId)} for ${currentClass.name}`;
+  }
+
+  function eligibleAttendanceEnrollments() {
+    return enrollments
       .filter((enrollment) => !["cancelled", "rejected"].includes(String(enrollment.status || "").toLowerCase()))
       .filter((enrollment) => children.some((child) => child.id === enrollment.childId))
       .filter((enrollment) => classes.some((classRecord) => classRecord.id === enrollment.classId));
-    const defaultEnrollment = eligibleEnrollments[0];
-    const defaultClass = defaultEnrollment ? classes.find((classRecord) => classRecord.id === defaultEnrollment.classId) : null;
-    const defaultDate = defaultClass ? defaultAttendanceDate(defaultClass) : localDateValue(new Date());
+  }
+
+  function currentAttendanceTarget(eligibleEnrollments = eligibleAttendanceEnrollments()) {
+    if (!eligibleEnrollments.length) {
+      selectedAttendanceTarget = "";
+      return "";
+    }
+    if (selectedAttendanceTarget && eligibleEnrollments.some((enrollment) => attendanceTargetValue(enrollment) === selectedAttendanceTarget)) {
+      return selectedAttendanceTarget;
+    }
+    const preferredEnrollment = selectedChildId
+      ? eligibleEnrollments.find((enrollment) => enrollment.childId === selectedChildId)
+      : null;
+    selectedAttendanceTarget = attendanceTargetValue(preferredEnrollment || eligibleEnrollments[0]);
+    return selectedAttendanceTarget;
+  }
+
+  function attendanceTargetValue(enrollment) {
+    return `${enrollment.childId}|${enrollment.classId}`;
+  }
+
+  function parentAttendanceDateOptions() {
+    const today = new Date();
+    return [
+      { key: "yesterday", label: "Yesterday", dateValue: localDateValue(addDays(today, -1)) },
+      { key: "today", label: "Today", dateValue: localDateValue(today) },
+      { key: "tomorrow", label: "Tomorrow", dateValue: localDateValue(addDays(today, 1)) },
+    ];
+  }
+
+  function parentAttendanceDateCard(option, enrollment, classRecord) {
+    const state = parentAttendanceDateState(option.dateValue, enrollment, classRecord);
+    const disabled = state.kind !== "valid";
     return `
-      <form class="operation-panel" data-attendance-form>
-        <div class="workspace-heading">
-          <h3>Check in child</h3>
-          <p>Save attendance for a child already enrolled in a class.</p>
-        </div>
-        <label>
-          <span>Child and class <span class="required-marker" aria-label="required">*</span></span>
-          <select name="attendanceTarget" required ${eligibleEnrollments.length ? "" : "disabled"}>
-            ${
-              eligibleEnrollments.length
-                ? eligibleEnrollments.map((enrollment) => `
-                  <option value="${escapeHtml(`${enrollment.childId}|${enrollment.classId}`)}">
-                    ${escapeHtml(`${childName(enrollment.childId)} - ${className(enrollment.classId)}`)}
-                  </option>
-                `).join("")
-                : `<option value="">No enrolled children are available</option>`
-            }
-          </select>
-        </label>
-        <label>
-          <span>Class date <span class="required-marker" aria-label="required">*</span></span>
-          <input name="classDate" required type="date" value="${escapeHtml(defaultDate)}" />
-        </label>
-        <div class="operation-actions">
-          <button ${eligibleEnrollments.length ? "" : "disabled"} type="submit">Check in</button>
-          <button class="secondary-button" data-operation-cancel type="button">Cancel</button>
-        </div>
-      </form>
+      <button
+        class="attendance-date-card is-${escapeHtml(state.kind)}"
+        data-parent-attendance-date="${escapeHtml(option.dateValue)}"
+        data-attendance-child-id="${escapeHtml(enrollment?.childId || "")}"
+        data-attendance-class-id="${escapeHtml(enrollment?.classId || "")}"
+        title="${escapeHtml(state.message)}"
+        type="button"
+        ${disabled ? "disabled" : ""}
+      >
+        <span class="attendance-card-label">${escapeHtml(option.label)}</span>
+        <strong>${escapeHtml(formatDate(option.dateValue))}</strong>
+        <span class="attendance-card-status">${escapeHtml(state.label)}</span>
+        <small>${escapeHtml(state.message)}</small>
+      </button>
     `;
+  }
+
+  function parentAttendanceDateState(dateValue, enrollment, classRecord) {
+    if (!enrollment || !classRecord) {
+      return {
+        kind: "invalid",
+        label: "Unavailable",
+        message: "No enrolled child and class is selected.",
+      };
+    }
+    const attendanceMessage = attendanceDateMessage(classRecord, dateValue);
+    if (attendanceMessage) {
+      return {
+        kind: "invalid",
+        label: "Not valid",
+        message: attendanceMessage,
+      };
+    }
+    const checkedRecord = attendanceRecords.find((record) =>
+      record.childId === enrollment.childId
+      && record.classId === enrollment.classId
+      && record.classDate === dateValue
+      && String(record.status || "").toLowerCase() === "checked_in"
+    );
+    if (checkedRecord) {
+      return {
+        kind: "checked",
+        label: "Checked in",
+        message: checkedRecord.checkedInAt
+          ? `Checked in ${new Date(checkedRecord.checkedInAt).toLocaleString()}`
+          : "Attendance has already been checked in.",
+      };
+    }
+    return {
+      kind: "valid",
+      label: "Ready",
+      message: `Click to check in ${childName(enrollment.childId)}.`,
+    };
   }
 
   async function copyPublicClassLink(classId) {
@@ -1697,6 +2306,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     return classes.find((classRecord) => classRecord.id === classId)?.name || "Class";
   }
 
+  function teacherName(teacher) {
+    return [teacher.firstName, teacher.lastName].filter(Boolean).join(" ").trim() || teacher.email || "Teacher";
+  }
+
   function childName(childId) {
     const child = children.find((item) => item.id === childId);
     return child ? `${child.firstName} ${child.lastName}`.trim() : "Child";
@@ -1712,17 +2325,6 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
     const normalized = String(value).includes("T") ? String(value) : `${value}T00:00:00`;
     return new Date(normalized).toLocaleDateString();
-  }
-
-  function defaultAttendanceDate(classRecord) {
-    const today = localDateValue(new Date());
-    if (classRecord.startDate && today < classRecord.startDate) {
-      return classRecord.startDate;
-    }
-    if (classRecord.endDate && today > classRecord.endDate) {
-      return classRecord.endDate;
-    }
-    return today;
   }
 
   function enrollmentDateRange(classRecord) {
@@ -1741,10 +2343,25 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   function classScheduleText(classRecord) {
     const time = [classRecord.startTime, classRecord.endTime].filter(Boolean).join("-");
     if (classRecord.classType === "weekly") {
-      const days = (classRecord.weekdays || []).join(", ");
+      const days = formatWeekdayList(classRecord.weekdays || []);
       return [days, time].filter(Boolean).join(" ");
     }
     return time || "Time range";
+  }
+
+  function formatWeekdayList(weekdays) {
+    const labels = (weekdays || []).map(formatWeekdayLabel);
+    if (labels.length <= 1) {
+      return labels[0] || "";
+    }
+    return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  }
+
+  function formatWeekdayLabel(weekday) {
+    return String(weekday || "")
+      .toLowerCase()
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
   function isEnrollmentClosed(classRecord) {
@@ -1762,9 +2379,17 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     return new Date(year, month - 1, day);
   }
 
+  function addDays(date, amount) {
+    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    next.setDate(next.getDate() + amount);
+    return next;
+  }
+
   function resetSiteWorkspaceData() {
     resetPrograms();
     resetClasses();
+    resetStudents();
+    resetAttendanceGrid();
   }
 
   function resetPrograms() {
@@ -1778,6 +2403,21 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     classes = [];
     selectedClassId = "";
     selectedClassPricing = null;
+    classTeachers = [];
+    loadingClassTeachers = false;
+    resetAttendanceGrid();
+  }
+
+  function resetStudents() {
+    students = [];
+    selectedStudentClassId = "";
+    loadingStudents = false;
+  }
+
+  function resetAttendanceGrid() {
+    attendanceGrid = null;
+    selectedAttendanceClassId = "";
+    loadingAttendance = false;
   }
 
   async function loadPrograms() {
@@ -1817,6 +2457,17 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       classes = response.classes || [];
       if (selectedClassId && !classes.some((classRecord) => classRecord.id === selectedClassId)) {
         selectedClassId = "";
+        classTeachers = [];
+      }
+      if (selectedStudentClassId && !classes.some((classRecord) => classRecord.id === selectedStudentClassId)) {
+        selectedStudentClassId = "";
+      }
+      if (selectedAttendanceClassId && !classes.some((classRecord) => classRecord.id === selectedAttendanceClassId)) {
+        selectedAttendanceClassId = "";
+        attendanceGrid = null;
+      }
+      if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && !selectedAttendanceClassId && classes.length) {
+        selectedAttendanceClassId = classes[0].id;
       }
       classRows = classes.length
         ? classes.map((classRecord) => `${classRecord.name} - ${programName(classRecord.programId)} - ${classScheduleText(classRecord)}`)
@@ -1827,6 +2478,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     } finally {
       loadingClasses = false;
       render();
+    }
+    if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && selectedAttendanceClassId && !attendanceGrid) {
+      await loadAttendanceGrid();
     }
   }
 
@@ -1852,6 +2506,30 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
   }
 
+  async function loadClassTeachers() {
+    if (loadingClassTeachers || !school?.tenantId || role !== "SCHOOL_ADMIN" || !selectedClassId) {
+      return;
+    }
+    const classId = selectedClassId;
+    loadingClassTeachers = true;
+    render();
+    try {
+      const response = await listClassTeachers(school.tenantId, classId);
+      if (selectedClassId === classId) {
+        classTeachers = response.teachers || [];
+      }
+      error = "";
+    } catch (loadError) {
+      if (selectedClassId === classId) {
+        classTeachers = [];
+      }
+      error = loadError instanceof Error ? loadError.message : "Class teachers could not be loaded.";
+    } finally {
+      loadingClassTeachers = false;
+      render();
+    }
+  }
+
   async function closeEnrollmentForClass(classId) {
     const classRecord = classes.find((item) => item.id === classId);
     if (!classRecord) {
@@ -1865,6 +2543,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       notice = "Enrollment closed for this class.";
       error = "";
       await loadClassesAfterMutation();
+      if (activeSectionId === "students") {
+        await loadStudents();
+      }
     } catch (actionError) {
       notice = "";
       error = actionError instanceof Error ? actionError.message : "Enrollment could not be closed.";
@@ -1885,6 +2566,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       notice = "Class stopped.";
       error = "";
       await loadClassesAfterMutation();
+      if (activeSectionId === "students") {
+        await loadStudents();
+      }
     } catch (actionError) {
       notice = "";
       error = actionError instanceof Error ? actionError.message : "Class could not be stopped.";
@@ -1922,6 +2606,24 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
   }
 
+  async function loadStudents() {
+    if (loadingStudents || !school?.tenantId || role !== "SCHOOL_ADMIN") {
+      return;
+    }
+    loadingStudents = true;
+    try {
+      const response = await listStudents(school.tenantId, selectedStudentClassId);
+      students = response.students || [];
+      error = "";
+    } catch (loadError) {
+      students = [];
+      error = loadError instanceof Error ? loadError.message : "Students could not be loaded.";
+    } finally {
+      loadingStudents = false;
+      render();
+    }
+  }
+
   async function loadEnrollments() {
     if (loadingEnrollments || !school?.tenantId || role !== "PARENT") {
       return;
@@ -1949,6 +2651,24 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       error = "";
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : "Attendance could not be loaded.";
+    } finally {
+      loadingAttendance = false;
+      render();
+    }
+  }
+
+  async function loadAttendanceGrid() {
+    if (loadingAttendance || !school?.tenantId || role !== "SCHOOL_ADMIN" || !selectedAttendanceClassId) {
+      return;
+    }
+    loadingAttendance = true;
+    render();
+    try {
+      attendanceGrid = await getClassAttendanceGrid(school.tenantId, selectedAttendanceClassId);
+      error = "";
+    } catch (loadError) {
+      attendanceGrid = null;
+      error = loadError instanceof Error ? loadError.message : "Class attendance could not be loaded.";
     } finally {
       loadingAttendance = false;
       render();
@@ -2037,19 +2757,23 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
   }
 
-  async function handleAttendanceSubmit(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const formData = new FormData(form);
-    const [childId, classId] = String(formText(formData, "attendanceTarget") || "").split("|");
-    const classDate = formText(formData, "classDate");
-    if (!childId || !classId || !classDate) {
-      showTransientToast("Choose an enrolled child, class, and date.", "error");
+  async function handleParentAttendanceCardClick(button) {
+    const childId = button.dataset.attendanceChildId;
+    const classId = button.dataset.attendanceClassId;
+    const classDate = button.dataset.parentAttendanceDate;
+    const enrollment = eligibleAttendanceEnrollments().find((entry) =>
+      entry.childId === childId && entry.classId === classId
+    );
+    const classRecord = classes.find((item) => item.id === classId);
+    const state = parentAttendanceDateState(classDate, enrollment, classRecord);
+    if (state.kind !== "valid") {
+      notice = "";
+      error = state.message;
+      render();
       return;
     }
-    const submitButton = form.querySelector("button[type='submit']");
-    submitButton.disabled = true;
-    submitButton.textContent = "Checking in";
+
+    button.disabled = true;
     try {
       await checkInAttendance({
         tenantId: school.tenantId,
@@ -2057,7 +2781,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         classId,
         classDate,
       });
-      notice = "Attendance check-in saved.";
+      notice = `${childName(childId)} checked in for ${formatDate(classDate)}.`;
       error = "";
       activeOperation = "";
       await loadAttendance();
@@ -2424,6 +3148,12 @@ function workspaceHint(section) {
     return section.actions.length
       ? "Manage classes, pricing, and public links from each row."
       : "Browse the classes published by this school.";
+  }
+  if (section.id === "attendance") {
+    if (role === "PARENT") {
+      return "Use the date cards to check in eligible enrolled children and review attendance history.";
+    }
+    return "Select a class to review student attendance by date.";
   }
   return "Choose an operation above to open the working panel for this area.";
 }
@@ -2823,6 +3553,11 @@ function isPricingOperation(action) {
   return action.toLowerCase().includes("pricing");
 }
 
+function isAssignTeacherOperation(action) {
+  const normalized = action.toLowerCase();
+  return normalized.includes("teacher") && normalized.includes("assign");
+}
+
 function isNotificationOperation(action) {
   const normalized = action.toLowerCase();
   return normalized.includes("notification") || normalized.includes("message") || normalized === "free send";
@@ -2836,10 +3571,6 @@ function isCreateChildOperation(action) {
 function isEditChildOperation(action) {
   const normalized = action.toLowerCase();
   return normalized.includes("child") && normalized.includes("edit");
-}
-
-function parentAttendanceOperation(section, action) {
-  return section.id === "attendance" && action && action.toLowerCase() === "check in child";
 }
 
 function notificationComposePanel(classes = []) {
@@ -3320,8 +4051,8 @@ function fieldsFor(
   }
   if (normalized.includes("teacher")) {
     return [
-      { name: "email", label: "Teacher email", type: "email", placeholder: "teacher@example.com" },
-      { name: "className", label: "Class", placeholder: "Beginner Drawing" },
+      { name: "email", label: "Teacher email", type: "email", placeholder: "teacher@example.com", required: true },
+      { name: "className", label: "Class", type: "static", value: selectedClass?.name || "Selected class" },
     ];
   }
   if (normalized.includes("payment") || normalized.includes("receipt") || normalized.includes("refund") || normalized.includes("stripe")) {
