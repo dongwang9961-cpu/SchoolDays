@@ -17,3 +17,11 @@ export function createClass(tenantId, request) {
 export function updateClass(tenantId, classId, request) {
   return apiPatch(`/api/tenants/${tenantId}/classes/${classId}`, request);
 }
+
+export function closeClassEnrollment(tenantId, classId) {
+  return apiPost(`/api/tenants/${tenantId}/classes/${classId}/close-enrollment`, {});
+}
+
+export function stopClass(tenantId, classId) {
+  return apiPost(`/api/tenants/${tenantId}/classes/${classId}/stop`, {});
+}

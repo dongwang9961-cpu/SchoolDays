@@ -2,7 +2,7 @@ import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
 import { checkInAttendance, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
-import { createClass, listAvailableClasses, listClasses, updateClass } from "./api/classes.js";
+import { closeClassEnrollment, createClass, listAvailableClasses, listClasses, stopClass, updateClass } from "./api/classes.js";
 import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
 import { getClassPricing, getTenantClassPricing, saveClassPricing } from "./api/pricing.js";
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
@@ -661,6 +661,16 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         await copyPublicClassLink(button.dataset.classPublicLinkId);
       });
     });
+    root.querySelectorAll("[data-class-close-enrollment-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await closeEnrollmentForClass(button.dataset.classCloseEnrollmentId);
+      });
+    });
+    root.querySelectorAll("[data-class-stop-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await stopSelectedClass(button.dataset.classStopId);
+      });
+    });
     root.querySelectorAll("[data-class-enroll-id]").forEach((button) => {
       button.addEventListener("click", () => {
         selectedClassId = button.dataset.classEnrollId;
@@ -1216,12 +1226,14 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                   </button>
                   ${role === "PARENT" ? `
                     <div class="row-actions">
+                      ${isEnrollmentClosed(classRecord) ? `<span class="row-muted-label">Enrollment closed</span>` : ""}
                       <button
                         aria-label="Enroll in ${escapeHtml(classRecord.name)}"
                         class="icon-button subtle-icon-button"
                         data-class-enroll-id="${escapeHtml(classRecord.id)}"
-                        title="Enroll"
+                        title="${isEnrollmentClosed(classRecord) ? "Enrollment closed" : "Enroll"}"
                         type="button"
+                        ${isEnrollmentClosed(classRecord) ? "disabled" : ""}
                       >
                         +
                       </button>
@@ -1254,6 +1266,26 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                         type="button"
                       >
                         ↗
+                      </button>
+                      <button
+                        aria-label="Close enrollment for ${escapeHtml(classRecord.name)}"
+                        class="icon-button subtle-icon-button"
+                        data-class-close-enrollment-id="${escapeHtml(classRecord.id)}"
+                        title="Close enrollment"
+                        type="button"
+                        ${isEnrollmentClosed(classRecord) ? "disabled" : ""}
+                      >
+                        ⊘
+                      </button>
+                      <button
+                        aria-label="Stop ${escapeHtml(classRecord.name)}"
+                        class="icon-button subtle-icon-button danger-icon-button"
+                        data-class-stop-id="${escapeHtml(classRecord.id)}"
+                        title="Stop class"
+                        type="button"
+                        ${String(classRecord.status || "").toLowerCase() === "stopped" ? "disabled" : ""}
+                      >
+                        ■
                       </button>
                     </div>
                   `}
@@ -1715,6 +1747,16 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     return time || "Time range";
   }
 
+  function isEnrollmentClosed(classRecord) {
+    if (String(classRecord?.status || "").toLowerCase() !== "active") {
+      return true;
+    }
+    if (!classRecord?.registrationClosesAt) {
+      return false;
+    }
+    return new Date(classRecord.registrationClosesAt).getTime() <= Date.now();
+  }
+
   function dateFromLocalValue(value) {
     const [year, month, day] = String(value).split("-").map(Number);
     return new Date(year, month - 1, day);
@@ -1808,6 +1850,52 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       loadingClassPricing = false;
       render();
     }
+  }
+
+  async function closeEnrollmentForClass(classId) {
+    const classRecord = classes.find((item) => item.id === classId);
+    if (!classRecord) {
+      return;
+    }
+    if (!window.confirm(`Close enrollment for ${classRecord.name}? Parents will no longer be able to enroll children in this class.`)) {
+      return;
+    }
+    try {
+      await closeClassEnrollment(school.tenantId, classId);
+      notice = "Enrollment closed for this class.";
+      error = "";
+      await loadClassesAfterMutation();
+    } catch (actionError) {
+      notice = "";
+      error = actionError instanceof Error ? actionError.message : "Enrollment could not be closed.";
+      render();
+    }
+  }
+
+  async function stopSelectedClass(classId) {
+    const classRecord = classes.find((item) => item.id === classId);
+    if (!classRecord) {
+      return;
+    }
+    if (!window.confirm(`Stop ${classRecord.name}? Parents will no longer be able to check in children for this class.`)) {
+      return;
+    }
+    try {
+      await stopClass(school.tenantId, classId);
+      notice = "Class stopped.";
+      error = "";
+      await loadClassesAfterMutation();
+    } catch (actionError) {
+      notice = "";
+      error = actionError instanceof Error ? actionError.message : "Class could not be stopped.";
+      render();
+    }
+  }
+
+  async function loadClassesAfterMutation() {
+    loadingClasses = false;
+    classRows = null;
+    await loadClasses();
   }
 
   async function loadChildren() {

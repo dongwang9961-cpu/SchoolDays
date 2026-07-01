@@ -136,6 +136,24 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
         return ResponseEntity.ok(classService.updateClass(tenantId, classId, request));
     }
 
+    @PostMapping("/classes/{classId}/close-enrollment")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<ClassResponse> closeClassEnrollment(
+            @PathVariable("tenantId") UUID tenantId,
+            @PathVariable("classId") UUID classId
+    ) {
+        return ResponseEntity.ok(classService.closeEnrollment(tenantId, classId));
+    }
+
+    @PostMapping("/classes/{classId}/stop")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<ClassResponse> stopClass(
+            @PathVariable("tenantId") UUID tenantId,
+            @PathVariable("classId") UUID classId
+    ) {
+        return ResponseEntity.ok(classService.stopClass(tenantId, classId));
+    }
+
     @GetMapping("/classes/{classId}/pricing")
     @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
     public ResponseEntity<ClassPricingResponse> getClassPricing(

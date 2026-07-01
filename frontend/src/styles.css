@@ -223,6 +223,17 @@ button:disabled {
   white-space: nowrap;
 }
 
+.danger-icon-button {
+  color: #b42318;
+}
+
+.row-muted-label {
+  align-self: center;
+  color: #6a7890;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 .standalone-panel {
   background: #ffffff;
   border: 1px solid #d8deeb;

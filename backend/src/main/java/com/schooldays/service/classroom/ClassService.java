@@ -121,6 +121,25 @@ public class ClassService {
         return ClassResponse.from(classDao.save(record));
     }
 
+    public ClassResponse closeEnrollment(UUID tenantId, UUID classId) {
+        ClassesRecord record = classDao.findByTenantAndId(tenantId, classId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found"));
+        record.setRegistrationClosesAt(OffsetDateTime.now());
+        record.setUpdatedAt(OffsetDateTime.now());
+        record.changed(true);
+        return ClassResponse.from(classDao.save(record));
+    }
+
+    public ClassResponse stopClass(UUID tenantId, UUID classId) {
+        ClassesRecord record = classDao.findByTenantAndId(tenantId, classId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found"));
+        record.setStatus("stopped");
+        record.setRegistrationClosesAt(OffsetDateTime.now());
+        record.setUpdatedAt(OffsetDateTime.now());
+        record.changed(true);
+        return ClassResponse.from(classDao.save(record));
+    }
+
     private void requireTenant(UUID tenantId) {
         boolean exists = dsl.fetchExists(dsl.selectOne()
                 .from(TENANTS)
