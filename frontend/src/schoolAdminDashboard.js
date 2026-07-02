@@ -1401,28 +1401,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       return notificationList(rows);
     }
     if (section.id === "children" && children.length) {
-      return `
-        <div class="data-list" role="listbox" aria-label="Children">
-          ${children.map((child) => `
-            <div class="data-row child-row ${child.id === selectedChildId ? "is-selected" : ""}">
-              <button class="program-row-main" data-child-id="${escapeHtml(child.id)}" type="button">
-                <span>${escapeHtml(`${child.firstName} ${child.lastName}`.trim())}</span>
-                <span>${escapeHtml([child.grade, child.school].filter(Boolean).join(" - ") || "Student profile")}</span>
-                <span>${escapeHtml(child.status || "active")}</span>
-              </button>
-              <button
-                aria-label="Edit ${escapeHtml(`${child.firstName} ${child.lastName}`.trim())}"
-                class="icon-button subtle-icon-button"
-                data-child-edit-id="${escapeHtml(child.id)}"
-                title="Edit child"
-                type="button"
-              >
-                ✎
-              </button>
-            </div>
-          `).join("")}
-        </div>
-      `;
+      return childProfileGrid();
     }
     if (section.id === "enrollments" && role === "PARENT") {
       return `
@@ -1507,6 +1486,68 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         ${familyClassList("Registered classes", childEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current registrations.")}
         ${familyClassList("Open classes", availableClasses.map(availableClassSummary), "No additional open classes right now.")}
       </article>
+    `;
+  }
+
+  function childProfileGrid() {
+    return `
+      <div class="child-profile-grid" role="list" aria-label="Children">
+        ${children.map((child) => childProfileCard(child)).join("")}
+      </div>
+    `;
+  }
+
+  function childProfileCard(child) {
+    const name = childFullName(child);
+    const summary = [child.grade ? `Grade ${child.grade}` : "", child.school || ""]
+      .filter(Boolean)
+      .join(" - ");
+    const details = [
+      child.dateOfBirth ? childProfileDetail("Date of birth", formatDate(child.dateOfBirth)) : "",
+      child.gender ? childProfileDetail("Gender", child.gender) : "",
+      child.grade ? childProfileDetail("Grade", child.grade) : "",
+      child.school ? childProfileDetail("School", child.school) : "",
+      Array.isArray(child.race) && child.race.length ? childProfileDetail("Race", child.race.join(", ")) : "",
+      childProfileDetail("Status", statusLabel(child.status || "active")),
+    ].filter(Boolean);
+    return `
+      <article class="child-profile-card ${child.id === selectedChildId ? "is-selected" : ""}" role="listitem">
+        <button
+          aria-pressed="${child.id === selectedChildId ? "true" : "false"}"
+          class="child-profile-main"
+          data-child-id="${escapeHtml(child.id)}"
+          type="button"
+        >
+          <span>${escapeHtml(name)}</span>
+          <small>${escapeHtml(summary || "Student profile")}</small>
+        </button>
+
+        <dl class="child-profile-details">
+          ${details.join("")}
+        </dl>
+
+        ${child.note ? `<p class="child-profile-note">${escapeHtml(child.note)}</p>` : ""}
+
+        <div class="child-profile-actions">
+          <button
+            aria-label="Edit ${escapeHtml(name)}"
+            class="secondary-button compact-button"
+            data-child-edit-id="${escapeHtml(child.id)}"
+            type="button"
+          >
+            Edit
+          </button>
+        </div>
+      </article>
+    `;
+  }
+
+  function childProfileDetail(label, value) {
+    return `
+      <div>
+        <dt>${escapeHtml(label)}</dt>
+        <dd>${escapeHtml(value || "Unavailable")}</dd>
+      </div>
     `;
   }
 
@@ -2536,7 +2577,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
   function childName(childId) {
     const child = children.find((item) => item.id === childId);
-    return child ? `${child.firstName} ${child.lastName}`.trim() : "Child";
+    return child ? childFullName(child) : "Child";
+  }
+
+  function childFullName(child) {
+    return [child?.firstName, child?.lastName].filter(Boolean).join(" ").trim() || "Child";
   }
 
   function formatDate(value) {
