@@ -24,6 +24,7 @@ if (currentAuth) {
     brandTitle: school ? "Access your school account" : "School website",
     brandDescription: brandDescription(),
     contextMarkup: schoolContextMarkup(),
+    allowGoogleLogin: Boolean(school && schoolRoute.portal === "parent" && !urlParams.get("token")),
     initialMode,
     modes: modeOptions(),
     onAuthenticated: handleAuthenticated,

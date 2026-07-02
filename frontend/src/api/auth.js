@@ -16,9 +16,13 @@ export function getAuthConfig() {
   return apiGet("/api/auth/config", { auth: false });
 }
 
-export function startGoogleRegistration({ tenantId }) {
+export function startGoogleAuth({ tenantId }) {
   const params = new URLSearchParams({ tenantId });
   return apiGet(`/api/auth/google/start?${params.toString()}`, { auth: false });
+}
+
+export function startGoogleRegistration({ tenantId }) {
+  return startGoogleAuth({ tenantId });
 }
 
 export function getCurrentAuthUser() {

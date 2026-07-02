@@ -5,7 +5,7 @@ import {
   getAuthConfig,
   login,
   requestParentRegistrationLink,
-  startGoogleRegistration,
+  startGoogleAuth,
 } from "./api/auth.js";
 
 export function renderAuthPage({
@@ -13,6 +13,7 @@ export function renderAuthPage({
   brandTitle,
   brandDescription,
   contextMarkup,
+  allowGoogleLogin = false,
   initialMode,
   modes,
   onAuthenticated,
@@ -45,7 +46,7 @@ export function renderAuthPage({
             </div>
           ` : ""}
 
-          ${loginForm()}
+          ${loginForm({ allowGoogleLogin })}
           ${parentRegisterForm()}
           ${completeRegistrationForm(Boolean(initialToken))}
           ${teacherInvitationForm(Boolean(initialToken))}
@@ -57,6 +58,7 @@ export function renderAuthPage({
 
   const modeSelect = root.querySelector("[data-mode-select]");
   const forms = [...root.querySelectorAll("[data-auth-form]")];
+  const googleLoginButton = root.querySelector("[data-google-login]");
   const googleRegisterButton = root.querySelector("[data-google-register]");
 
   root.querySelectorAll('input[name="token"]').forEach((input) => {
@@ -66,8 +68,9 @@ export function renderAuthPage({
   showMode(initialMode);
 
   modeSelect?.addEventListener("change", () => showMode(modeSelect.value));
-  googleRegisterButton?.addEventListener("click", handleGoogleRegistration);
-  configureGoogleRegistration();
+  googleLoginButton?.addEventListener("click", () => handleGoogleAuth("login", googleLoginButton));
+  googleRegisterButton?.addEventListener("click", () => handleGoogleAuth("register", googleRegisterButton));
+  configureGoogleAuth();
 
   forms.forEach((form) => {
     form.addEventListener("submit", (event) => handleSubmit(event, form));
@@ -155,21 +158,21 @@ export function renderAuthPage({
     return completeRegistration(request);
   }
 
-  async function handleGoogleRegistration() {
-    const form = root.querySelector('[data-auth-form="register"]');
+  async function handleGoogleAuth(mode, button) {
+    const form = root.querySelector(`[data-auth-form="${mode}"]`);
     const errorMessage = form.querySelector("[data-error]");
     const successMessage = form.querySelector("[data-success]");
 
     setMessage(errorMessage, "");
     setMessage(successMessage, "");
-    setLoading(googleRegisterButton, true, "Opening Google");
+    setLoading(button, true, "Opening Google");
 
     try {
-      const response = await startGoogleRegistration({ tenantId: requireTenantId() });
+      const response = await startGoogleAuth({ tenantId: requireTenantId() });
       window.location.assign(response.authorizationUrl);
     } catch (error) {
-      setMessage(errorMessage, error instanceof Error ? error.message : "Unable to start Google registration");
-      setLoading(googleRegisterButton, false);
+      setMessage(errorMessage, error instanceof Error ? error.message : "Unable to start Google sign-in");
+      setLoading(button, false);
     }
   }
 
@@ -180,22 +183,30 @@ export function renderAuthPage({
     throw new Error("Open the school website URL before registering as a parent.");
   }
 
-  async function configureGoogleRegistration() {
-    if (!googleRegisterButton) {
+  async function configureGoogleAuth() {
+    if (!googleLoginButton && !googleRegisterButton) {
       return;
     }
 
     try {
       const config = await getAuthConfig();
       if (config.googleLoginEnabled) {
-        googleRegisterButton.disabled = false;
-        googleRegisterButton.textContent = "Continue with Google";
+        if (googleLoginButton) {
+          googleLoginButton.disabled = false;
+          googleLoginButton.textContent = "Sign in with Google";
+        }
+        if (googleRegisterButton) {
+          googleRegisterButton.disabled = false;
+          googleRegisterButton.textContent = "Continue with Google";
+        }
         return;
       }
     } catch (error) {
       // Keep email-link registration available if config cannot be loaded.
     }
 
+    root.querySelector("[data-google-login-row]")?.remove();
+    root.querySelector("[data-google-login-divider]")?.remove();
     root.querySelector("[data-google-register-row]")?.remove();
     root.querySelector("[data-google-register-divider]")?.remove();
     const hint = root.querySelector("[data-parent-register-hint]");
@@ -228,13 +239,21 @@ function modeOptions(modes) {
     .join("");
 }
 
-function loginForm() {
+function loginForm({ allowGoogleLogin = false } = {}) {
   return `
     <form class="auth-form" data-auth-form="login">
       <div class="form-heading">
         <h2>Welcome back</h2>
         <p>Use the email address connected to your account.</p>
       </div>
+
+      ${allowGoogleLogin ? `
+        <div data-google-login-row>
+          <button class="secondary-button google-auth-button" data-google-login disabled type="button">Checking Google</button>
+        </div>
+
+        <div class="form-divider" data-google-login-divider><span>or</span></div>
+      ` : ""}
 
       <label>
         <span>Email <span class="required-marker" aria-label="required">*</span></span>
