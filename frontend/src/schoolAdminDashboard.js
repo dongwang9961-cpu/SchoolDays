@@ -257,7 +257,6 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let attendanceRecords = [];
   let attendanceGrid = null;
   let selectedAttendanceClassId = "";
-  let selectedAttendanceTarget = "";
   let adminAttendanceView = "table";
   let loadingAttendance = false;
   let enrollmentModalOpen = false;
@@ -594,14 +593,6 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     });
     root.querySelector("[data-enrollment-cancel]")?.addEventListener("click", closeEnrollmentModal);
     root.querySelector("[data-enrollment-form]")?.addEventListener("submit", handleEnrollmentSubmit);
-    root.querySelector("[data-parent-attendance-target]")?.addEventListener("change", (event) => {
-      selectedAttendanceTarget = event.currentTarget.value;
-      const [childId] = selectedAttendanceTarget.split("|");
-      selectedChildId = childId || selectedChildId;
-      notice = "";
-      error = "";
-      render();
-    });
     root.querySelectorAll("[data-parent-attendance-date]").forEach((button) => {
       button.addEventListener("click", async () => {
         await handleParentAttendanceCardClick(button);
@@ -2401,59 +2392,29 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
   function parentAttendancePanel() {
     const eligibleEnrollments = eligibleAttendanceEnrollments();
-    const currentTarget = currentAttendanceTarget(eligibleEnrollments);
-    const currentEnrollment = eligibleEnrollments.find((enrollment) => attendanceTargetValue(enrollment) === currentTarget);
-    const currentClass = currentEnrollment ? classes.find((classRecord) => classRecord.id === currentEnrollment.classId) : null;
     return `
       <section class="parent-attendance-panel" aria-label="Parent attendance check-in">
         <div class="workspace-heading workspace-heading-row">
           <div>
             <h3>Check in</h3>
-            <p>${escapeHtml(parentAttendancePanelSummary(eligibleEnrollments, currentEnrollment, currentClass))}</p>
+            <p>${escapeHtml(parentAttendancePanelSummary(eligibleEnrollments))}</p>
           </div>
           <span class="attendance-window-label">Yesterday / Today / Tomorrow</span>
         </div>
 
-        <div class="parent-attendance-controls">
-          <label>
-            <span>Child and class</span>
-            <select data-parent-attendance-target ${eligibleEnrollments.length ? "" : "disabled"}>
-              ${
-                eligibleEnrollments.length
-                  ? eligibleEnrollments.map((enrollment) => {
-                      const value = attendanceTargetValue(enrollment);
-                      return `
-                        <option value="${escapeHtml(value)}" ${value === currentTarget ? "selected" : ""}>
-                          ${escapeHtml(`${childName(enrollment.childId)} - ${className(enrollment.classId)}`)}
-                        </option>
-                      `;
-                    }).join("")
-                  : `<option value="">No enrolled children are available</option>`
-              }
-            </select>
-          </label>
-        </div>
-
-        <div class="parent-attendance-cards" aria-label="Available check-in dates">
-          ${parentAttendanceDateOptions()
-            .map((option) => parentAttendanceDateCard(option, currentEnrollment, currentClass))
-            .join("")}
-        </div>
+        ${parentAttendanceEnrollmentGrid(eligibleEnrollments)}
       </section>
     `;
   }
 
-  function parentAttendancePanelSummary(eligibleEnrollments, currentEnrollment, currentClass) {
+  function parentAttendancePanelSummary(eligibleEnrollments) {
     if (loadingChildren || loadingClasses || loadingEnrollments || loadingAttendance) {
       return "Loading attendance options.";
     }
     if (!eligibleEnrollments.length) {
       return "Enroll a child in an active class before checking in.";
     }
-    if (!currentEnrollment || !currentClass) {
-      return "Choose an enrolled child and class.";
-    }
-    return `${childName(currentEnrollment.childId)} for ${currentClass.name}`;
+    return `${eligibleEnrollments.length} child and class ${eligibleEnrollments.length === 1 ? "option is" : "options are"} ready for check-in.`;
   }
 
   function eligibleAttendanceEnrollments() {
@@ -2463,23 +2424,40 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       .filter((enrollment) => classes.some((classRecord) => classRecord.id === enrollment.classId));
   }
 
-  function currentAttendanceTarget(eligibleEnrollments = eligibleAttendanceEnrollments()) {
+  function parentAttendanceEnrollmentGrid(eligibleEnrollments) {
+    if (loadingChildren || loadingClasses || loadingEnrollments || loadingAttendance) {
+      return `<div class="data-list"><div class="data-row">Loading attendance options...</div></div>`;
+    }
     if (!eligibleEnrollments.length) {
-      selectedAttendanceTarget = "";
-      return "";
+      return `<div class="data-list"><div class="data-row">No enrolled children are available for check-in.</div></div>`;
     }
-    if (selectedAttendanceTarget && eligibleEnrollments.some((enrollment) => attendanceTargetValue(enrollment) === selectedAttendanceTarget)) {
-      return selectedAttendanceTarget;
-    }
-    const preferredEnrollment = selectedChildId
-      ? eligibleEnrollments.find((enrollment) => enrollment.childId === selectedChildId)
-      : null;
-    selectedAttendanceTarget = attendanceTargetValue(preferredEnrollment || eligibleEnrollments[0]);
-    return selectedAttendanceTarget;
+    return `
+      <div class="parent-attendance-group-grid" aria-label="Child and class check-ins">
+        ${eligibleEnrollments.map((enrollment) => parentAttendanceEnrollmentGroup(enrollment)).join("")}
+      </div>
+    `;
   }
 
-  function attendanceTargetValue(enrollment) {
-    return `${enrollment.childId}|${enrollment.classId}`;
+  function parentAttendanceEnrollmentGroup(enrollment) {
+    const classRecord = classes.find((item) => item.id === enrollment.classId);
+    return `
+      <section class="parent-attendance-group" aria-label="${escapeHtml(`${childName(enrollment.childId)} - ${classRecord?.name || "Class"}`)}">
+        <header>
+          <div>
+            <span>Child and class</span>
+            <h4>${escapeHtml(childName(enrollment.childId))}</h4>
+            <p>${escapeHtml(classRecord ? `${classRecord.name} - ${classScheduleText(classRecord)}` : "Class details unavailable")}</p>
+          </div>
+          <small>${escapeHtml(statusLabel(enrollment.status || "enrolled"))}</small>
+        </header>
+
+        <div class="parent-attendance-cards" aria-label="${escapeHtml(`${childName(enrollment.childId)} check-in dates`)}">
+          ${parentAttendanceDateOptions()
+            .map((option) => parentAttendanceDateCard(option, enrollment, classRecord))
+            .join("")}
+        </div>
+      </section>
+    `;
   }
 
   function parentAttendanceDateOptions() {

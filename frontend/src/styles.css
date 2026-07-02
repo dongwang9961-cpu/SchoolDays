@@ -1342,10 +1342,61 @@ button:disabled {
   white-space: nowrap;
 }
 
-.parent-attendance-controls {
+.parent-attendance-group-grid {
   display: grid;
-  gap: 10px;
-  max-width: 520px;
+  gap: 18px;
+}
+
+.parent-attendance-group {
+  border-top: 1px solid #e6ebf3;
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.parent-attendance-group:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.parent-attendance-group header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.parent-attendance-group header div {
+  min-width: 0;
+}
+
+.parent-attendance-group h4 {
+  color: #172033;
+  font-size: 1.08rem;
+  margin: 3px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.parent-attendance-group p {
+  color: #5f6f86;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.parent-attendance-group span,
+.parent-attendance-group small {
+  color: #66758c;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.parent-attendance-group small {
+  background: #f5f7fb;
+  border: 1px solid #d8deeb;
+  border-radius: 999px;
+  padding: 5px 9px;
+  white-space: nowrap;
 }
 
 .parent-attendance-cards {
@@ -1988,6 +2039,10 @@ button:disabled {
 
   .parent-attendance-cards {
     grid-template-columns: 1fr;
+  }
+
+  .parent-attendance-group header {
+    display: grid;
   }
 
   .class-management-header {
