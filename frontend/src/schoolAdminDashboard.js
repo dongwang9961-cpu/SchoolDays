@@ -152,8 +152,8 @@ const parentSections = [
     id: "overview",
     label: "Overview",
     title: "Family overview",
-    summary: "Review children, enrollments, payments, and check-in status.",
-    actions: ["Add child", "Browse classes"],
+    summary: "Review children, current registrations, and open classes.",
+    actions: [],
     rows: ["No family dashboard data loaded yet."],
   },
   {
@@ -389,6 +389,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         render();
         if (activeSectionId === "notifications") {
           loadNotifications();
+        }
+        if (activeSectionId === "overview" && role === "PARENT") {
+          loadChildren();
+          loadClasses();
+          loadEnrollments();
         }
         if (activeSectionId === "children") {
           loadChildren();
@@ -1196,6 +1201,12 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   }
 
   function rowsFor(section) {
+    if (section.id === "overview" && role === "PARENT") {
+      if (loadingChildren || loadingClasses || loadingEnrollments) {
+        return ["Loading family overview..."];
+      }
+      return children.length ? [] : ["No child records loaded yet."];
+    }
     if (section.id === "sites") {
       if (loadingSites && siteRows === null) {
         return ["Loading sites..."];
@@ -1266,6 +1277,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   }
 
   function dataList(section, rows) {
+    if (section.id === "overview" && role === "PARENT") {
+      return parentOverview(rows);
+    }
     if (section.id === "sites" && sites.length) {
       return `
         <div class="data-list" role="listbox" aria-label="Sites">
@@ -1430,6 +1444,121 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         ${rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")}
       </div>
     `;
+  }
+
+  function parentOverview(rows) {
+    if (loadingChildren || loadingClasses || loadingEnrollments) {
+      return `
+        <div class="data-list">
+          ${rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")}
+        </div>
+      `;
+    }
+    if (!children.length) {
+      return `
+        <div class="data-list">
+          ${rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")}
+        </div>
+      `;
+    }
+    const activeEnrollments = activeParentEnrollments();
+    const openClasses = classes.filter((classRecord) => !isEnrollmentClosed(classRecord));
+    return `
+      <section class="family-overview" aria-label="Family overview">
+        <div class="family-overview-metrics" aria-label="Family summary">
+          ${familyMetric("Children", children.length)}
+          ${familyMetric("Current registrations", activeEnrollments.length)}
+          ${familyMetric("Open classes", openClasses.length)}
+          ${familyMetric("Pending payments", pendingPaymentEnrollments().length)}
+        </div>
+        <div class="family-child-grid">
+          ${children.map((child) => familyChildCard(child)).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function familyMetric(label, value) {
+    return `
+      <div class="family-metric">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(String(value))}</strong>
+      </div>
+    `;
+  }
+
+  function familyChildCard(child) {
+    const childEnrollments = activeParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
+    const availableClasses = availableClassesForChild(child.id);
+    const details = [
+      child.dateOfBirth ? `DOB ${formatDate(child.dateOfBirth)}` : "",
+      child.grade ? `Grade ${child.grade}` : "",
+      child.school || "",
+      child.status ? statusLabel(child.status) : "",
+    ].filter(Boolean);
+    return `
+      <article class="family-child-card">
+        <header>
+          <div>
+            <h4>${escapeHtml(`${child.firstName} ${child.lastName}`.trim() || "Child")}</h4>
+            <p>${escapeHtml(details.join(" - ") || "Student profile")}</p>
+          </div>
+        </header>
+        ${familyClassList("Registered classes", childEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current registrations.")}
+        ${familyClassList("Open classes", availableClasses.map(availableClassSummary), "No additional open classes right now.")}
+      </article>
+    `;
+  }
+
+  function familyClassList(title, items, emptyText) {
+    return `
+      <section class="family-class-section">
+        <h5>${escapeHtml(title)}</h5>
+        ${
+          items.length
+            ? `<div class="family-class-list">${items.join("")}</div>`
+            : `<p>${escapeHtml(emptyText)}</p>`
+        }
+      </section>
+    `;
+  }
+
+  function enrolledClassSummary(enrollment) {
+    const classRecord = classes.find((item) => item.id === enrollment.classId);
+    return `
+      <div class="family-class-row">
+        <strong>${escapeHtml(classRecord?.name || "Class")}</strong>
+        <span>${escapeHtml(classRecord ? `${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}` : "Class details unavailable")}</span>
+        <small>${escapeHtml(statusLabel(enrollment.status || "enrolled"))}</small>
+      </div>
+    `;
+  }
+
+  function availableClassSummary(classRecord) {
+    return `
+      <div class="family-class-row">
+        <strong>${escapeHtml(classRecord.name || "Class")}</strong>
+        <span>${escapeHtml(`${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}`)}</span>
+        <small>${escapeHtml(classRecord.registrationClosesAt ? `Registration closes ${new Date(classRecord.registrationClosesAt).toLocaleString()}` : "Registration open")}</small>
+      </div>
+    `;
+  }
+
+  function availableClassesForChild(childId) {
+    const registeredClassIds = new Set(
+      activeParentEnrollments()
+        .filter((enrollment) => enrollment.childId === childId)
+        .map((enrollment) => enrollment.classId)
+    );
+    return classes
+      .filter((classRecord) => !registeredClassIds.has(classRecord.id))
+      .filter((classRecord) => !isEnrollmentClosed(classRecord));
+  }
+
+  function activeParentEnrollments() {
+    return enrollments.filter((enrollment) =>
+      !["cancelled", "rejected"].includes(String(enrollment.status || "").toLowerCase())
+    );
   }
 
   function notificationList(rows) {
@@ -3232,6 +3361,9 @@ function serializeForm(form) {
 
 function workspaceHint(section, role = "") {
   if (section.id === "overview") {
+    if (role === "PARENT") {
+      return "Scan each child’s profile, current registrations, and classes still open for enrollment.";
+    }
     return "Choose an operation to start a workflow.";
   }
   if (section.id === "sites") {
