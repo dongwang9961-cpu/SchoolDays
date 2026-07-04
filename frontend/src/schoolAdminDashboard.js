@@ -771,6 +771,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         openEnrollmentModal();
       });
     });
+    root.querySelectorAll("[data-family-register-child-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await handleFamilyRegisterClick(button);
+      });
+    });
     root.querySelectorAll("[data-child-id]").forEach((button) => {
       button.addEventListener("click", () => {
         selectedChildId = button.dataset.childId;
@@ -1475,7 +1480,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
           </div>
         </header>
         ${familyClassList("Registered classes", childEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current registrations.")}
-        ${familyClassList("Open classes", availableClasses.map(availableClassSummary), "No additional open classes right now.")}
+        ${familyClassList("Open classes", availableClasses.map((classRecord) => availableClassSummary(classRecord, child.id)), "No additional open classes right now.")}
       </article>
     `;
   }
@@ -1566,12 +1571,22 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     `;
   }
 
-  function availableClassSummary(classRecord) {
+  function availableClassSummary(classRecord, childId) {
     return `
-      <div class="family-class-row">
-        <strong>${escapeHtml(classRecord.name || "Class")}</strong>
-        <span>${escapeHtml(`${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}`)}</span>
-        <small>${escapeHtml(classRecord.registrationClosesAt ? `Registration closes ${new Date(classRecord.registrationClosesAt).toLocaleString()}` : "Registration open")}</small>
+      <div class="family-open-class-row">
+        <div>
+          <strong>${escapeHtml(classRecord.name || "Class")}</strong>
+          <span>${escapeHtml(`${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}`)}</span>
+          <small>${escapeHtml(classRecord.registrationClosesAt ? `Registration closes ${new Date(classRecord.registrationClosesAt).toLocaleString()}` : "Registration open")}</small>
+        </div>
+        <button
+          class="secondary-button compact-button family-register-button"
+          data-family-register-child-id="${escapeHtml(childId)}"
+          data-family-register-class-id="${escapeHtml(classRecord.id)}"
+          type="button"
+        >
+          Register
+        </button>
       </div>
     `;
   }
@@ -3038,6 +3053,45 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       error = errorMessage;
       showTransientToast(errorMessage, "error");
       render();
+    }
+  }
+
+  async function handleFamilyRegisterClick(button) {
+    const childId = button.dataset.familyRegisterChildId;
+    const classId = button.dataset.familyRegisterClassId;
+    const child = children.find((item) => item.id === childId);
+    const classRecord = classes.find((item) => item.id === classId);
+    if (!child || !classRecord) {
+      showTransientToast("Child or class could not be found.", "error");
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Registering";
+    try {
+      const result = await createEnrollment({
+        tenantId: school.tenantId,
+        classId,
+        childIds: [childId],
+        optionalFeeItemIds: [],
+      });
+      notice = result.paymentRequired
+        ? `${childName(childId)} enrolled in ${classRecord.name}. Payment is required before the enrollment is complete.`
+        : `${childName(childId)} enrolled in ${classRecord.name}.`;
+      error = "";
+      showTransientToast(notice);
+      await loadEnrollments();
+      await loadAttendance();
+      render();
+    } catch (enrollmentError) {
+      const message = enrollmentError instanceof Error ? enrollmentError.message : "Enrollment could not be created.";
+      notice = "";
+      error = message;
+      showTransientToast(message, "error");
+      render();
+    } finally {
+      button.disabled = false;
+      button.textContent = "Register";
     }
   }
 
