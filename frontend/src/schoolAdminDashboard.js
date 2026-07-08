@@ -1,6 +1,6 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
-import { importExternalStudents, inviteUsers } from "./api/auth.js";
+import { importExternalStudents, inviteUsers, listExternalStudents } from "./api/auth.js";
 import { checkInAttendance, getClassAttendanceGrid, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, stopClass, updateClass } from "./api/classes.js";
@@ -282,6 +282,15 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let checkInImportMessage = "";
   let checkInImportError = "";
   let checkInImportSubmitting = false;
+  let checkInStudentsOpen = false;
+  let checkInStudentsLoading = false;
+  let checkInStudents = [];
+  let checkInStudentsError = "";
+  let checkInStudentsTabulator = null;
+  let checkInStudentsPage = 1;
+  let checkInStudentsPageSize = 25;
+  let checkInStudentsTotalRows = 0;
+  let checkInStudentsTotalPages = 1;
   let checkInReminderOpen = false;
   let checkInReminderDismissed = false;
   let noticeTimer = null;
@@ -317,6 +326,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     scheduleNoticeDismissal();
     if (!(role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "camera")) {
       stopCheckInScanner();
+    }
+    if (!checkInStudentsOpen) {
+      destroyCheckInStudentsTabulator();
     }
     if (role === "SCHOOL_ADMIN" && !adminMode) {
       renderSchoolAdminLanding();
@@ -1254,17 +1266,23 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                   type="file"
                 />
               </label>
-              <p class="check-in-import-file-name">${escapeHtml(checkInImportFile?.name || "No file selected")}</p>
+              <p class="check-in-import-file-name" data-check-in-import-file-name>${escapeHtml(checkInImportFile?.name || "No file selected")}</p>
               ${checkInImportError ? `<p class="message error" role="alert">${escapeHtml(checkInImportError)}</p>` : ""}
               ${checkInImportMessage ? `<p class="message success" role="status">${escapeHtml(checkInImportMessage)}</p>` : ""}
               <button class="secondary-button compact-button" data-check-in-import-submit type="submit">
                 ${checkInImportSubmitting ? "Importing..." : "Import file"}
               </button>
             </form>
-            <button class="check-in-launch-button" data-check-in-start type="button">Check In</button>
+            <div class="check-in-launch-actions">
+              <button class="secondary-button compact-button" data-check-in-show-all type="button">
+                ${checkInStudentsLoading ? "Loading..." : "Show all"}
+              </button>
+              <button class="check-in-launch-button" data-check-in-start type="button">Check In</button>
+            </div>
           </section>
         </section>
       </main>
+      ${checkInStudentsOpen ? renderCheckInStudentsModal() : ""}
     `;
 
     root.querySelector("[data-logout]").addEventListener("click", handleLogout);
@@ -1277,13 +1295,33 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       checkInFlowStage = "camera";
       render();
     });
+    root.querySelector("[data-check-in-show-all]")?.addEventListener("click", handleShowCheckInStudents);
     root.querySelector("[data-check-in-import-file]")?.addEventListener("change", (event) => {
       checkInImportFile = event.currentTarget.files?.[0] || null;
       checkInImportError = "";
       checkInImportMessage = "";
-      render();
+      updateCheckInImportFileLabel();
     });
     root.querySelector("[data-check-in-import-form]")?.addEventListener("submit", handleCheckInImportSubmit);
+    root.querySelector("[data-check-in-students-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeCheckInStudentsModal();
+      }
+    });
+    root.querySelector("[data-check-in-students-close]")?.addEventListener("click", closeCheckInStudentsModal);
+    root.querySelector("[data-check-in-students-prev]")?.addEventListener("click", () => {
+      if (checkInStudentsPage > 1) {
+        checkInStudentsPage -= 1;
+        loadCheckInStudents();
+      }
+    });
+    root.querySelector("[data-check-in-students-next]")?.addEventListener("click", () => {
+      if (checkInStudentsPage < checkInStudentsTotalPages) {
+        checkInStudentsPage += 1;
+        loadCheckInStudents();
+      }
+    });
+    initializeCheckInStudentsTabulator();
   }
 
   function handleLogout() {
@@ -1317,6 +1355,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       ];
       checkInImportMessage = `Import complete: ${summaryParts.join(", ")}.`;
       checkInImportFile = null;
+      updateCheckInImportFileLabel();
+      checkInStudents = [];
+      if (checkInStudentsOpen) {
+        await loadCheckInStudents();
+      }
     } catch (importError) {
       checkInImportMessage = "";
       checkInImportError = importError instanceof Error ? importError.message : "Import could not be completed.";
@@ -1324,6 +1367,138 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       checkInImportSubmitting = false;
       render();
     }
+  }
+
+  async function handleShowCheckInStudents() {
+    checkInStudentsOpen = true;
+    checkInStudentsError = "";
+    checkInStudentsPage = 1;
+    render();
+    await loadCheckInStudents();
+  }
+
+  function closeCheckInStudentsModal() {
+    checkInStudentsOpen = false;
+    checkInStudentsError = "";
+    destroyCheckInStudentsTabulator();
+    render();
+  }
+
+  async function loadCheckInStudents() {
+    if (checkInStudentsLoading) {
+      return;
+    }
+    checkInStudentsLoading = true;
+    render();
+    try {
+      const response = await listExternalStudents({
+        tenantId: school.tenantId,
+        page: checkInStudentsPage,
+        pageSize: checkInStudentsPageSize,
+      });
+      checkInStudents = response.students || [];
+      checkInStudentsPage = response.page || checkInStudentsPage;
+      checkInStudentsPageSize = response.pageSize || checkInStudentsPageSize;
+      checkInStudentsTotalRows = response.totalRows || 0;
+      checkInStudentsTotalPages = response.totalPages || 1;
+    } catch (loadError) {
+      checkInStudentsError = loadError instanceof Error ? loadError.message : "Students could not be loaded.";
+    } finally {
+      checkInStudentsLoading = false;
+      render();
+      if (checkInStudentsOpen && !checkInStudentsError) {
+        await initializeCheckInStudentsTabulator();
+      }
+    }
+  }
+
+  function updateCheckInImportFileLabel() {
+    const label = root.querySelector("[data-check-in-import-file-name]");
+    if (label) {
+      label.textContent = checkInImportFile?.name || "No file selected";
+    }
+  }
+
+  function renderCheckInStudentsModal() {
+    return `
+      <div class="modal-backdrop" data-check-in-students-modal>
+        <section class="check-in-students-panel" role="dialog" aria-modal="true" aria-labelledby="check-in-students-title">
+          <div class="workspace-heading workspace-heading-row">
+            <div>
+              <h3 id="check-in-students-title">External students</h3>
+              <p>${escapeHtml(checkInStudentsLoading ? "Loading imported students..." : `${(checkInStudentsTotalRows || checkInStudents.length)} student${(checkInStudentsTotalRows || checkInStudents.length) === 1 ? "" : "s"}.`)}</p>
+            </div>
+            <button class="secondary-button compact-button" data-check-in-students-close type="button">Close</button>
+          </div>
+          ${checkInStudentsError ? `<p class="message error" role="alert">${escapeHtml(checkInStudentsError)}</p>` : ""}
+          <div class="check-in-students-table-shell">
+            <div data-check-in-students-tabulator class="check-in-students-tabulator"></div>
+          </div>
+          <div class="check-in-pagination-bar">
+            <button class="secondary-button compact-button" data-check-in-students-prev type="button" ${checkInStudentsPage <= 1 || checkInStudentsLoading ? "disabled" : ""}>Prev</button>
+            <span>Page ${escapeHtml(String(checkInStudentsPage))} of ${escapeHtml(String(checkInStudentsTotalPages))}</span>
+            <button class="secondary-button compact-button" data-check-in-students-next type="button" ${checkInStudentsPage >= checkInStudentsTotalPages || checkInStudentsLoading ? "disabled" : ""}>Next</button>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function destroyCheckInStudentsTabulator() {
+    if (checkInStudentsTabulator) {
+      checkInStudentsTabulator.destroy();
+      checkInStudentsTabulator = null;
+    }
+  }
+
+  async function initializeCheckInStudentsTabulator() {
+    const element = root.querySelector("[data-check-in-students-tabulator]");
+    if (!element || !checkInStudentsOpen) {
+      return;
+    }
+
+    const Tabulator = await loadTabulator();
+    if (!element.isConnected || !checkInStudentsOpen) {
+      return;
+    }
+
+    destroyCheckInStudentsTabulator();
+    checkInStudentsTabulator = new Tabulator(element, {
+      data: checkInStudents.map((student) => ({
+        externalId: student.externalId || "",
+        lastName: student.lastName || "",
+        firstName: student.firstName || "",
+        studentName: student.studentName || "",
+        birthDate: student.birthDate || "",
+        gradeLevelCode: student.gradeLevelCode || "",
+        genderCode: student.genderCode || "",
+      })),
+      columns: [
+        {
+          formatter: "rowSelection",
+          titleFormatter: "rowSelection",
+          titleFormatterParams: { rowRange: "active" },
+          hozAlign: "center",
+          headerSort: false,
+          width: 56,
+        },
+        { title: "StudentID", field: "externalId", headerFilter: "input", width: 150 },
+        { title: "LastName", field: "lastName", headerFilter: "input", width: 150 },
+        { title: "FirstName", field: "firstName", headerFilter: "input", width: 150 },
+        { title: "StudentName", field: "studentName", headerFilter: "input", width: 220 },
+        { title: "DOB", field: "birthDate", headerFilter: "input", width: 120 },
+        { title: "GradeLevelCode", field: "gradeLevelCode", headerFilter: "input", width: 160 },
+        { title: "GenderCode", field: "genderCode", headerFilter: "input", width: 140 },
+      ],
+      height: "100%",
+      layout: "fitDataFill",
+      placeholder: checkInStudentsLoading ? "Loading..." : "No external students imported yet.",
+      movableColumns: true,
+      selectable: true,
+      columnDefaults: {
+        vertAlign: "middle",
+      },
+    });
   }
 
   function initializeInviteUserPage() {

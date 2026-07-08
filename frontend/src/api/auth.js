@@ -26,6 +26,14 @@ export function importExternalStudents({ tenantId, file }) {
   return apiPostForm(`/api/tenants/${encodeURIComponent(tenantId)}/external-students/import`, formData);
 }
 
+export function listExternalStudents({ tenantId, page = 1, pageSize = 25 }) {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+  return apiGet(`/api/tenants/${encodeURIComponent(tenantId)}/external-students?${params.toString()}`);
+}
+
 export function getAuthConfig() {
   return apiGet("/api/auth/config", { auth: false });
 }

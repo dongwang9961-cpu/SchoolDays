@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.schooldays.dto.api.EndpointStatusResponse;
+import com.schooldays.dto.externalstudent.ExternalStudentListResponse;
 import com.schooldays.dto.externalstudent.ExternalStudentImportResponse;
 import com.schooldays.dto.auth.InviteUserRequest;
 import com.schooldays.dto.auth.InviteUserResponse;
@@ -162,6 +163,16 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             @RequestParam("file") MultipartFile file
     ) {
         return ResponseEntity.ok(externalStudentImportService.importStudents(tenantId, file));
+    }
+
+    @GetMapping("/external-students")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<ExternalStudentListResponse> listExternalStudents(
+            @PathVariable("tenantId") UUID tenantId,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "pageSize", defaultValue = "25") int pageSize
+    ) {
+        return ResponseEntity.ok(externalStudentImportService.listStudents(tenantId, page, pageSize));
     }
 
     @PostMapping("/classes")

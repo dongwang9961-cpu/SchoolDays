@@ -21,8 +21,11 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.schooldays.dto.externalstudent.ExternalStudentListResponse;
 import com.schooldays.dto.externalstudent.ExternalStudentImportResponse;
+import com.schooldays.dto.externalstudent.ExternalStudentRowResponse;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -44,6 +47,7 @@ public class ExternalStudentImportService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Table<?> EXTERNAL_STUDENTS = table(name("external_students"));
+    private static final Field<Long> SEQ_ID = field(name("seq_id"), Long.class);
     private static final Field<UUID> TENANT_ID = field(name("tenant_id"), UUID.class);
     private static final Field<String> EXTERNAL_ID = field(name("external_id"), String.class);
     private static final Field<String> STUDENT_NAME = field(name("student_name"), String.class);
@@ -122,6 +126,52 @@ public class ExternalStudentImportService {
                 skippedCount,
                 errors
         );
+    }
+
+    public ExternalStudentListResponse listStudents(UUID tenantId) {
+        return listStudents(tenantId, 1, 25);
+    }
+
+    public ExternalStudentListResponse listStudents(UUID tenantId, int page, int pageSize) {
+        int safePage = Math.max(page, 1);
+        int safePageSize = Math.max(pageSize, 1);
+        long totalRows = dsl.selectCount()
+                .from(EXTERNAL_STUDENTS)
+                .where(TENANT_ID.eq(tenantId))
+                .fetchOne(0, long.class);
+        int totalPages = (int) Math.max(1, (totalRows + safePageSize - 1) / safePageSize);
+        int offset = (safePage - 1) * safePageSize;
+
+        List<ExternalStudentRowResponse> students = dsl.select(
+                        EXTERNAL_ID,
+                        STUDENT_NAME,
+                        GENDER,
+                        BIRTH_DATE,
+                        METADATA
+                )
+                .from(EXTERNAL_STUDENTS)
+                .where(TENANT_ID.eq(tenantId))
+                .orderBy(SEQ_ID.asc())
+                .limit(safePageSize)
+                .offset(offset)
+                .fetch(record -> {
+                    String externalId = record.get(EXTERNAL_ID);
+                    String studentName = record.get(STUDENT_NAME);
+                    String gender = record.get(GENDER);
+                    LocalDate birthDate = record.get(BIRTH_DATE);
+                    JSONB metadata = record.get(METADATA);
+                    JsonNode metadataNode = readMetadata(metadata);
+                    return new ExternalStudentRowResponse(
+                            externalId,
+                            studentName,
+                            metadataText(metadataNode, "lastName"),
+                            metadataText(metadataNode, "firstName"),
+                            birthDate,
+                            metadataText(metadataNode, "gradeLevelCode"),
+                            metadataText(metadataNode, "genderCode")
+                    );
+                });
+        return new ExternalStudentListResponse(students, safePage, safePageSize, totalRows, totalPages);
     }
 
     private List<Map<String, String>> readRows(MultipartFile file) {
@@ -218,6 +268,21 @@ public class ExternalStudentImportService {
         if (value != null && !value.isBlank()) {
             node.put(field, value.trim());
         }
+    }
+
+    private JsonNode readMetadata(JSONB metadata) {
+        try {
+            return OBJECT_MAPPER.readTree(metadata == null ? "{}" : metadata.data());
+        } catch (Exception exception) {
+            return OBJECT_MAPPER.createObjectNode();
+        }
+    }
+
+    private String metadataText(JsonNode node, String field) {
+        if (node == null || !node.hasNonNull(field)) {
+            return "";
+        }
+        return node.get(field).asText("");
     }
 
     private String normalizeHeader(String header) {
