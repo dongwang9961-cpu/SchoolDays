@@ -4,6 +4,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.schooldays.dto.api.EndpointStatusResponse;
+import com.schooldays.dto.auth.InviteUserRequest;
+import com.schooldays.dto.auth.InviteUserResponse;
 import com.schooldays.dto.classroom.ClassListResponse;
 import com.schooldays.dto.classroom.ClassResponse;
 import com.schooldays.dto.classroom.CreateClassRequest;
@@ -19,6 +21,7 @@ import com.schooldays.dto.site.SiteListResponse;
 import com.schooldays.dto.site.SiteResponse;
 import com.schooldays.dto.site.UpdateSiteRequest;
 import com.schooldays.dto.student.StudentRosterResponse;
+import com.schooldays.service.auth.AuthService;
 import com.schooldays.service.classroom.ClassService;
 import com.schooldays.service.pricing.ClassPricingService;
 import com.schooldays.service.program.ProgramService;
@@ -27,6 +30,7 @@ import com.schooldays.service.student.StudentRosterService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -45,19 +49,22 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     private final ClassService classService;
     private final ClassPricingService classPricingService;
     private final StudentRosterService studentRosterService;
+    private final AuthService authService;
 
     public TenantSchoolSetupController(
             SiteService siteService,
             ProgramService programService,
             ClassService classService,
             ClassPricingService classPricingService,
-            StudentRosterService studentRosterService
+            StudentRosterService studentRosterService,
+            AuthService authService
     ) {
         this.siteService = siteService;
         this.programService = programService;
         this.classService = classService;
         this.classPricingService = classPricingService;
         this.studentRosterService = studentRosterService;
+        this.authService = authService;
     }
 
     @GetMapping("/sites")
@@ -129,6 +136,16 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             @RequestParam(value = "classId", required = false) UUID classId
     ) {
         return ResponseEntity.ok(studentRosterService.listActiveClassStudents(tenantId, classId));
+    }
+
+    @PostMapping("/user-invitations")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<InviteUserResponse> inviteUsers(
+            @PathVariable("tenantId") UUID tenantId,
+            @Valid @RequestBody InviteUserRequest request,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(authService.inviteUsers(tenantId, userId(authentication), request));
     }
 
     @PostMapping("/classes")

@@ -23,11 +23,12 @@ public class RegistrationLinkDao {
     }
 
     public Optional<RegistrationLinkRow> findPendingByTokenHash(String tokenHash, OffsetDateTime now) {
-        return dsl.select(
+                return dsl.select(
                         USER_REGISTRATION_LINKS.ID,
                         USER_REGISTRATION_LINKS.TENANT_ID,
                         USER_REGISTRATION_LINKS.EMAIL,
-                        USER_REGISTRATION_LINKS.INTENDED_ROLE
+                        USER_REGISTRATION_LINKS.INTENDED_ROLE,
+                        USER_REGISTRATION_LINKS.RELATED_INVITATION_ID
                 )
                 .from(USER_REGISTRATION_LINKS)
                 .where(USER_REGISTRATION_LINKS.TOKEN_HASH.eq(tokenHash))
@@ -37,7 +38,8 @@ public class RegistrationLinkDao {
                         record.get(USER_REGISTRATION_LINKS.ID),
                         record.get(USER_REGISTRATION_LINKS.TENANT_ID),
                         record.get(USER_REGISTRATION_LINKS.EMAIL),
-                        record.get(USER_REGISTRATION_LINKS.INTENDED_ROLE)
+                        record.get(USER_REGISTRATION_LINKS.INTENDED_ROLE),
+                        record.get(USER_REGISTRATION_LINKS.RELATED_INVITATION_ID)
                 ));
     }
 
@@ -62,7 +64,13 @@ public class RegistrationLinkDao {
                 .setExpiresAt(expiresAt)
                 .setCreatedAt(now)
                 .setUpdatedAt(now));
-        return new RegistrationLinkRow(saved.getId(), tenantId, email, intendedRole);
+        return new RegistrationLinkRow(
+                saved.getId(),
+                tenantId,
+                email,
+                intendedRole,
+                relatedInvitationId
+        );
     }
 
     public void markUsed(UUID linkId, OffsetDateTime now) {

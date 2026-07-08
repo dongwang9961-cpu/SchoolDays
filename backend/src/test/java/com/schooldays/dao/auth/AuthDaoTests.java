@@ -342,7 +342,8 @@ class AuthDaoTests {
                 linkId,
                 tenantId,
                 "parent@example.com",
-                "PARENT"
+                "PARENT",
+                null
         ));
 
         registrationLinkDao.markUsed(linkId, now.plusMinutes(1));

@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.schooldays.service.auth.InvalidAuthRequestException;
 
-@RestControllerAdvice(assignableTypes = AuthController.class)
+@RestControllerAdvice
 public class AuthExceptionHandler {
 
     @ExceptionHandler(AuthenticationException.class)

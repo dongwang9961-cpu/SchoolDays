@@ -1916,7 +1916,7 @@ button:disabled {
 .admin-choice-grid {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .admin-choice-card {
@@ -1988,6 +1988,114 @@ button:disabled {
 .admin-site-list p {
   color: #5f6f86;
   margin: 0;
+}
+
+.admin-invite-page {
+  background: #f4f6fa;
+  display: grid;
+  min-height: 100vh;
+  padding: 24px 18px;
+}
+
+.admin-invite-shell {
+  display: grid;
+  gap: 20px;
+  margin: 0 auto;
+  max-width: 920px;
+  width: 100%;
+}
+
+.admin-invite-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+}
+
+.admin-invite-header h2 {
+  font-size: 1.9rem;
+  margin-bottom: 0;
+}
+
+.admin-invite-panel {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.invite-user-form {
+  display: grid;
+  gap: 16px;
+}
+
+.invite-user-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.invite-user-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.invite-user-form span {
+  color: #344258;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.invite-site-field,
+.invite-class-field {
+  grid-column: span 1;
+}
+
+.invite-email-field {
+  grid-column: 1 / -1;
+}
+
+.invite-email-field textarea {
+  max-width: 100%;
+}
+
+.invite-user-hint {
+  color: #5f6f86;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.invite-result-list {
+  display: grid;
+  gap: 10px;
+}
+
+.invite-result-row {
+  background: #f8fafc;
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.invite-result-row strong {
+  color: #172033;
+  font-size: 0.95rem;
+}
+
+.invite-result-row span {
+  color: #29466c;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.invite-result-row small {
+  color: #5f6f86;
+  line-height: 1.45;
 }
 
 .admin-check-in-page {
@@ -2168,6 +2276,19 @@ button:disabled {
   }
 
   .admin-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-invite-page {
+    padding: 18px;
+  }
+
+  .admin-invite-header {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .invite-user-grid {
     grid-template-columns: 1fr;
   }
 

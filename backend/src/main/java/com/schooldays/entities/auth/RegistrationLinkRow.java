@@ -6,6 +6,7 @@ public record RegistrationLinkRow(
         UUID id,
         UUID tenantId,
         String email,
-        String intendedRole
+        String intendedRole,
+        UUID relatedInvitationId
 ) {
 }

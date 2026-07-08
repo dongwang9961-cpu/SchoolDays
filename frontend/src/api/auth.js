@@ -12,6 +12,14 @@ export function requestParentRegistrationLink({ tenantId, email }) {
   return apiPost("/api/auth/request-parent-registration-link", { tenantId, email }, { auth: false });
 }
 
+export function inviteUsers({ tenantId, role, emails, classId }) {
+  return apiPost(`/api/tenants/${encodeURIComponent(tenantId)}/user-invitations`, {
+    role,
+    emails,
+    classId,
+  });
+}
+
 export function getAuthConfig() {
   return apiGet("/api/auth/config", { auth: false });
 }

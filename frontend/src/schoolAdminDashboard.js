@@ -1,5 +1,6 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
+import { inviteUsers } from "./api/auth.js";
 import { checkInAttendance, getClassAttendanceGrid, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, stopClass, updateClass } from "./api/classes.js";
@@ -265,6 +266,17 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let profileOpen = false;
   let profile = null;
   let loadingProfile = false;
+  let inviteUserRole = "SCHOOL_ADMIN";
+  let inviteUserEmails = "";
+  let inviteUserMessage = "";
+  let inviteUserError = "";
+  let inviteUserResults = [];
+  let inviteUserSubmitting = false;
+  let inviteUserSiteId = "";
+  let inviteUserClassId = "";
+  let inviteUserClasses = [];
+  let inviteUserClassesLoadedForSiteId = "";
+  let loadingInviteUserClasses = false;
   let checkInReminderOpen = false;
   let checkInReminderDismissed = false;
   let noticeTimer = null;
@@ -307,6 +319,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
     if (role === "SCHOOL_ADMIN" && adminMode === "checkIn") {
       renderSchoolAdminCheckIn();
+      return;
+    }
+    if (role === "SCHOOL_ADMIN" && adminMode === "inviteUser") {
+      renderSchoolAdminInviteUser();
       return;
     }
     if (role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
@@ -477,6 +493,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         activeOperation = "";
         notice = "";
         error = "";
+        if (adminMode === "inviteUser") {
+          inviteUserMessage = "";
+          inviteUserError = "";
+          inviteUserResults = [];
+        }
         if (adminMode === "site") {
           resetSiteWorkspaceData();
         }
@@ -889,6 +910,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
               <strong>Open camera check in</strong>
               <small>Start a focused scanner screen with sign out only and show each detected barcode value.</small>
             </button>
+            <button class="admin-choice-card" data-admin-mode="inviteUser" type="button">
+              <span>Invite New User</span>
+              <strong>Open invite page</strong>
+              <small>Invite school administrators, teachers, or parents from one place.</small>
+            </button>
           </div>
           ${profileOpen ? profilePanel(profile, user, loadingProfile) : ""}
           ${noticeToast(notice)}
@@ -935,6 +961,150 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         loadClasses();
       });
     });
+  }
+
+  function renderSchoolAdminInviteUser() {
+    root.innerHTML = `
+      <main class="admin-invite-page">
+        <section class="admin-invite-shell" aria-labelledby="admin-invite-title">
+          <header class="admin-invite-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(school.name)}</p>
+              <h2 id="admin-invite-title">Invite New User</h2>
+            </div>
+            <div class="header-actions">
+              <button class="secondary-button compact-button" data-admin-mode="" type="button">Back</button>
+              <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+            </div>
+          </header>
+
+          <section class="admin-invite-panel">
+            <div class="workspace-heading">
+              <h3>Invite user</h3>
+              <p>Choose a role, enter one or more email addresses, and send invitations from this page.</p>
+            </div>
+
+            ${inviteUserError ? `<p class="message error" role="alert">${escapeHtml(inviteUserError)}</p>` : ""}
+            ${inviteUserMessage ? `<p class="message success" role="status">${escapeHtml(inviteUserMessage)}</p>` : ""}
+
+            <form class="invite-user-form" data-invite-user-form>
+              <div class="invite-user-grid">
+                <label>
+                  <span>Role</span>
+                  <select data-invite-user-role name="role">
+                    <option value="SCHOOL_ADMIN" ${inviteUserRole === "SCHOOL_ADMIN" ? "selected" : ""}>School Administrator</option>
+                    <option value="TEACHER" ${inviteUserRole === "TEACHER" ? "selected" : ""}>Teacher</option>
+                    <option value="PARENT" ${inviteUserRole === "PARENT" ? "selected" : ""}>Parent</option>
+                  </select>
+                </label>
+
+                <label class="invite-site-field" data-invite-site-field ${inviteUserRole === "TEACHER" ? "" : "hidden"}>
+                  <span>Site</span>
+                  <select data-invite-user-site name="siteId" ${inviteUserRole === "TEACHER" ? "" : "disabled"}>
+                    <option value="">Choose a site</option>
+                    ${sites.map((site) => `
+                      <option value="${escapeHtml(site.id)}" ${inviteUserSiteId === site.id ? "selected" : ""}>
+                        ${escapeHtml(site.name)}
+                      </option>
+                    `).join("")}
+                  </select>
+                </label>
+
+                <label class="invite-class-field" data-invite-class-field ${inviteUserRole === "TEACHER" ? "" : "hidden"}>
+                  <span>Class</span>
+                  <select data-invite-user-class name="classId" ${inviteUserRole === "TEACHER" ? "" : "disabled"}>
+                    <option value="">${loadingInviteUserClasses ? "Loading classes..." : "Choose a class"}</option>
+                    ${inviteUserClasses.map((classRecord) => `
+                      <option value="${escapeHtml(classRecord.id)}" ${inviteUserClassId === classRecord.id ? "selected" : ""}>
+                        ${escapeHtml(classRecord.name)}
+                      </option>
+                    `).join("")}
+                  </select>
+                </label>
+              </div>
+
+              <label class="invite-email-field">
+                <span>Email addresses</span>
+                <textarea
+                  data-invite-user-emails
+                  name="emails"
+                  placeholder="Enter one email per line"
+                  rows="5"
+                  required
+                >${escapeHtml(inviteUserEmails)}</textarea>
+              </label>
+
+              <p class="invite-user-hint" data-invite-user-hint></p>
+
+              <div class="operation-actions">
+                <button data-invite-user-submit type="submit">${inviteUserSubmitting ? "Sending..." : "Send invitation"}</button>
+              </div>
+            </form>
+
+            <div class="invite-result-list" data-invite-user-results>
+              ${
+                inviteUserResults.length
+                  ? inviteUserResults.map((result) => `
+                    <div class="invite-result-row">
+                      <strong>${escapeHtml(result.email)}</strong>
+                      <span>${escapeHtml(inviteUserResultHeading(result))}</span>
+                      <small>${escapeHtml(result.message)}</small>
+                    </div>
+                  `).join("")
+                  : ""
+              }
+            </div>
+          </section>
+        </section>
+      </main>
+    `;
+
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    root.querySelector("[data-admin-mode]")?.addEventListener("click", () => {
+      adminMode = "";
+      inviteUserMessage = "";
+      inviteUserError = "";
+      inviteUserResults = [];
+      render();
+    });
+    root.querySelector("[data-invite-user-role]")?.addEventListener("change", (event) => {
+      inviteUserRole = event.currentTarget.value;
+      inviteUserMessage = "";
+      inviteUserError = "";
+      inviteUserResults = [];
+      if (inviteUserRole === "TEACHER") {
+        inviteUserSiteId = inviteUserSiteId || selectedSiteId || sites[0]?.id || "";
+        loadInviteUserClasses();
+      } else {
+        inviteUserClassId = "";
+        inviteUserClasses = [];
+        inviteUserClassesLoadedForSiteId = "";
+      }
+      render();
+    });
+    root.querySelector("[data-invite-user-site]")?.addEventListener("change", (event) => {
+      inviteUserSiteId = event.currentTarget.value;
+      inviteUserClassId = "";
+      inviteUserClasses = [];
+      inviteUserClassesLoadedForSiteId = "";
+      inviteUserMessage = "";
+      inviteUserError = "";
+      inviteUserResults = [];
+      loadInviteUserClasses();
+      render();
+    });
+    root.querySelector("[data-invite-user-class]")?.addEventListener("change", (event) => {
+      inviteUserClassId = event.currentTarget.value;
+      inviteUserMessage = "";
+      inviteUserError = "";
+      render();
+    });
+    root.querySelector("[data-invite-user-emails]")?.addEventListener("input", (event) => {
+      inviteUserEmails = event.currentTarget.value;
+      renderInviteUserHint();
+    });
+    root.querySelector("[data-invite-user-form]")?.addEventListener("submit", handleInviteUserSubmit);
+    initializeInviteUserPage();
   }
 
   function renderSiteLoginScreen() {
@@ -1045,6 +1215,139 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   function handleLogout() {
     stopCheckInScanner();
     onLogout();
+  }
+
+  function initializeInviteUserPage() {
+    if (inviteUserRole === "TEACHER") {
+      inviteUserSiteId = inviteUserSiteId || selectedSiteId || sites[0]?.id || "";
+    } else if (!inviteUserSiteId) {
+      inviteUserSiteId = selectedSiteId || sites[0]?.id || "";
+    }
+    if (inviteUserRole === "TEACHER" && inviteUserSiteId && inviteUserClassesLoadedForSiteId !== inviteUserSiteId) {
+      loadInviteUserClasses();
+    }
+    renderInviteUserHint();
+  }
+
+  async function loadInviteUserClasses() {
+    if (loadingInviteUserClasses || !school?.tenantId || !inviteUserSiteId) {
+      inviteUserClasses = [];
+      renderInviteUserHint();
+      return;
+    }
+    loadingInviteUserClasses = true;
+    renderInviteUserHint();
+    try {
+      const response = await listClasses(school.tenantId, inviteUserSiteId);
+      inviteUserClasses = response.classes || [];
+      inviteUserClassesLoadedForSiteId = inviteUserSiteId;
+      if (inviteUserClassId && !inviteUserClasses.some((classRecord) => classRecord.id === inviteUserClassId)) {
+        inviteUserClassId = "";
+      }
+      if (!inviteUserClassId) {
+        inviteUserClassId = inviteUserClasses[0]?.id || "";
+      }
+    } catch (loadError) {
+      inviteUserClasses = [];
+      inviteUserError = loadError instanceof Error ? loadError.message : "Classes could not be loaded.";
+    } finally {
+      loadingInviteUserClasses = false;
+      render();
+    }
+  }
+
+  function renderInviteUserHint() {
+    const hint = root.querySelector("[data-invite-user-hint]");
+    if (!hint) {
+      return;
+    }
+    hint.textContent = inviteUserHintText();
+  }
+
+  function inviteUserHintText() {
+    if (inviteUserRole === "SCHOOL_ADMIN") {
+      return "Invite one school administrator by email. Existing users are updated automatically.";
+    }
+    if (inviteUserRole === "TEACHER") {
+      if (!inviteUserSiteId) {
+        return "Choose a site before loading the class list.";
+      }
+      if (loadingInviteUserClasses) {
+        return "Loading classes for the selected site...";
+      }
+      return "Invite up to 5 teachers and assign them to the selected class.";
+    }
+    return "Invite any number of parents by email.";
+  }
+
+  function inviteUserResultHeading(result) {
+    if (!result) {
+      return "";
+    }
+    return `${result.role || "USER"} - ${result.outcome || "processed"}`;
+  }
+
+  async function handleInviteUserSubmit(event) {
+    event.preventDefault();
+
+    const emails = splitEmails(inviteUserEmails);
+    inviteUserMessage = "";
+    inviteUserError = "";
+    inviteUserResults = [];
+
+    if (!emails.length) {
+      inviteUserError = "Enter at least one email address.";
+      render();
+      return;
+    }
+    if (inviteUserRole === "SCHOOL_ADMIN" && emails.length > 1) {
+      inviteUserError = "School administrator invitations accept one email address per request.";
+      render();
+      return;
+    }
+    if (inviteUserRole === "TEACHER") {
+      if (emails.length > 5) {
+        inviteUserError = "Teacher invitations are limited to 5 email addresses per request.";
+        render();
+        return;
+      }
+      if (!inviteUserSiteId) {
+        inviteUserError = "Choose a site before inviting teachers.";
+        render();
+        return;
+      }
+      if (!inviteUserClassId) {
+        inviteUserError = "Choose a class before inviting teachers.";
+        render();
+        return;
+      }
+    }
+
+    inviteUserSubmitting = true;
+    render();
+
+    try {
+      const response = await inviteUsers({
+        tenantId: school.tenantId,
+        role: inviteUserRole,
+        emails,
+        classId: inviteUserRole === "TEACHER" ? inviteUserClassId : null,
+      });
+      inviteUserResults = response.results || [];
+      inviteUserMessage = inviteUserResults.length
+        ? "Invitation request processed."
+        : "Invitation request completed.";
+      inviteUserEmails = "";
+      if (inviteUserRole === "TEACHER" && inviteUserResults.length) {
+        loadInviteUserClasses();
+      }
+    } catch (inviteError) {
+      inviteUserMessage = "";
+      inviteUserError = inviteError instanceof Error ? inviteError.message : "Invitation could not be sent.";
+    } finally {
+      inviteUserSubmitting = false;
+      render();
+    }
   }
 
   async function startCheckInScanner() {
@@ -3543,6 +3846,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         <button class="${adminMode === "manage" ? "is-active" : ""}" data-admin-mode="manage" type="button">School setup</button>
         <button class="${adminMode === "site" ? "is-active" : ""}" data-admin-mode="site" type="button">Site workspace</button>
         <button class="${adminMode === "checkIn" ? "is-active" : ""}" data-admin-mode="checkIn" type="button">Check in</button>
+        <button class="${adminMode === "inviteUser" ? "is-active" : ""}" data-admin-mode="inviteUser" type="button">Invite New User</button>
       </div>
     `;
   }

@@ -1,5 +1,8 @@
 package com.schooldays.service.auth;
 
+import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
+import static com.schooldays.jooq.generated.tables.TeacherAssignments.TEACHER_ASSIGNMENTS;
+
 import java.net.URLEncoder;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -12,6 +15,7 @@ import java.util.UUID;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.schooldays.dto.api.EndpointStatusResponse;
 import com.schooldays.dao.auth.RegistrationLinkDao;
 import com.schooldays.dao.auth.RoleDao;
 import com.schooldays.dao.auth.TeacherInvitationDao;
@@ -25,10 +29,14 @@ import com.schooldays.dto.auth.AuthenticatedUserResponse;
 import com.schooldays.dto.auth.CompleteRegistrationRequest;
 import com.schooldays.dto.auth.GoogleCallbackResult;
 import com.schooldays.dto.auth.GoogleStartResponse;
+import com.schooldays.dto.auth.InviteUserRequest;
+import com.schooldays.dto.auth.InviteUserResponse;
+import com.schooldays.dto.auth.InviteUserResultResponse;
 import com.schooldays.dto.auth.LoginRequest;
 import com.schooldays.dto.auth.RegistrationLinkRequest;
 import com.schooldays.dto.auth.RegistrationLinkResponse;
 import com.schooldays.dto.auth.SelfServiceRegistrationLinkRequest;
+import com.schooldays.dto.school.PublicSchoolResponse;
 import com.schooldays.entities.auth.AuthenticatedUser;
 import com.schooldays.entities.auth.GoogleOAuthState;
 import com.schooldays.entities.auth.RegistrationLinkRow;
@@ -36,6 +44,7 @@ import com.schooldays.entities.auth.TeacherInvitationRow;
 import com.schooldays.entities.auth.TenantInvitationRow;
 import com.schooldays.service.email.SystemEmailMessage;
 import com.schooldays.service.email.SystemEmailService;
+import org.jooq.DSLContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
@@ -70,6 +79,7 @@ public class AuthService {
     private final UserDao userDao;
     private final UserIdentityDao userIdentityDao;
     private final RoleDao roleDao;
+    private final DSLContext dsl;
     private final SecureTokenGenerator tokenGenerator;
     private final GoogleOAuthStateService googleOAuthStateService;
     private final SystemEmailService systemEmailService;
@@ -96,6 +106,7 @@ public class AuthService {
             UserDao userDao,
             UserIdentityDao userIdentityDao,
             RoleDao roleDao,
+            DSLContext dsl,
             SecureTokenGenerator tokenGenerator,
             GoogleOAuthStateService googleOAuthStateService,
             SystemEmailService systemEmailService,
@@ -120,6 +131,7 @@ public class AuthService {
         this.userDao = userDao;
         this.userIdentityDao = userIdentityDao;
         this.roleDao = roleDao;
+        this.dsl = dsl;
         this.tokenGenerator = tokenGenerator;
         this.googleOAuthStateService = googleOAuthStateService;
         this.systemEmailService = systemEmailService;
@@ -197,6 +209,9 @@ public class AuthService {
                 now
         );
         roleDao.assignRole(userId, link.tenantId(), link.intendedRole());
+        if ("TEACHER".equals(link.intendedRole()) && link.relatedInvitationId() != null) {
+            assignTeacherToClass(link.tenantId(), link.relatedInvitationId(), userId, userId);
+        }
         registrationLinkDao.markUsed(link.id(), now);
 
         AuthenticatedUser principal = userDetailsService.loadById(userId);
@@ -303,6 +318,37 @@ public class AuthService {
         return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
     }
 
+    @Transactional
+    public InviteUserResponse inviteUsers(UUID tenantId, UUID invitedByUserId, InviteUserRequest request) {
+        String role = normalizeRole(request.role());
+        List<String> emails = request.emails() == null ? List.of() : request.emails();
+        if (emails.isEmpty()) {
+            throw new InvalidAuthRequestException("At least one email address is required");
+        }
+        if ("TEACHER".equals(role)) {
+            if (request.classId() == null) {
+                throw new InvalidAuthRequestException("A class must be selected for teacher invitations");
+            }
+            if (emails.size() > 5) {
+                throw new InvalidAuthRequestException("Teacher invitations are limited to 5 email addresses per request");
+            }
+        }
+        if ("SCHOOL_ADMIN".equals(role) && emails.size() > 1) {
+            throw new InvalidAuthRequestException("School administrator invitations accept one email address per request");
+        }
+        if (!Set.of("SCHOOL_ADMIN", "TEACHER", "PARENT").contains(role)) {
+            throw new InvalidAuthRequestException("Unknown invitation role: " + request.role());
+        }
+
+        PublicSchoolResponse school = tenantDao.findActivePublicSchoolById(tenantId)
+                .orElseThrow(() -> new InvalidAuthRequestException("School not found"));
+
+        List<InviteUserResultResponse> results = emails.stream()
+                .map(email -> inviteUser(tenantId, invitedByUserId, school, role, request.classId(), email))
+                .toList();
+        return new InviteUserResponse("success", results);
+    }
+
     public AuthResponse login(LoginRequest request) {
         var authentication = authenticationManager.authenticate(
                 UsernamePasswordAuthenticationToken.unauthenticated(
@@ -349,29 +395,194 @@ public class AuthService {
                 link.intendedRole(),
                 expiresAt
         );
-        sendRegistrationLinkEmail(response, completionLink);
+        sendRegistrationLinkEmail(link, response, completionLink);
         return response;
     }
 
-    private void sendRegistrationLinkEmail(RegistrationLinkResponse response, String completionLink) {
+    private InviteUserResultResponse inviteUser(
+            UUID tenantId,
+            UUID invitedByUserId,
+            PublicSchoolResponse school,
+            String role,
+            UUID classId,
+            String rawEmail
+    ) {
+        String email = EmailNormalizer.normalize(rawEmail);
+        UUID userId = userDao.findUserIdByEmail(email).orElse(null);
+
+        if ("SCHOOL_ADMIN".equals(role)) {
+            return inviteSchoolAdmin(tenantId, school, email, userId);
+        }
+        if ("TEACHER".equals(role)) {
+            return inviteTeacher(tenantId, invitedByUserId, school, classId, email, userId);
+        }
+        return inviteParent(tenantId, school, email, userId);
+    }
+
+    private InviteUserResultResponse inviteSchoolAdmin(
+            UUID tenantId,
+            PublicSchoolResponse school,
+            String email,
+            UUID userId
+    ) {
+        if (userId != null && roleDao.hasTenantRole(userId, tenantId, "SCHOOL_ADMIN")) {
+            return new InviteUserResultResponse(
+                    email,
+                    "SCHOOL_ADMIN",
+                    "already_admin",
+                    "The user is already a school administrator."
+            );
+        }
+
+        if (userId != null) {
+            roleDao.assignRole(userId, tenantId, "SCHOOL_ADMIN");
+            sendSchoolAdminGrantedEmail(school, email);
+            return new InviteUserResultResponse(
+                    email,
+                    "SCHOOL_ADMIN",
+                    "granted",
+                    "School administrator access granted and notification email sent."
+            );
+        }
+
+        createRegistrationLink(
+                tenantId,
+                email,
+                "SCHOOL_ADMIN",
+                "tenant_admin_invitation",
+                null
+        );
+        return new InviteUserResultResponse(
+                email,
+                "SCHOOL_ADMIN",
+                "invited",
+                "Invitation email sent with a registration link."
+        );
+    }
+
+    private InviteUserResultResponse inviteTeacher(
+            UUID tenantId,
+            UUID invitedByUserId,
+            PublicSchoolResponse school,
+            UUID classId,
+            String email,
+            UUID userId
+    ) {
+        requireClass(tenantId, classId);
+
+        if (userId != null && roleDao.hasTenantRole(userId, tenantId, "TEACHER") && isTeacherAssignedToClass(classId, userId)) {
+            return new InviteUserResultResponse(
+                    email,
+                    "TEACHER",
+                    "already_assigned",
+                    "The user is already a teacher for the selected class."
+            );
+        }
+
+        if (userId != null) {
+            roleDao.assignRole(userId, tenantId, "TEACHER");
+            assignTeacherToClass(tenantId, classId, userId, invitedByUserId);
+            sendTeacherGrantedEmail(school, tenantId, email, classId, false);
+            return new InviteUserResultResponse(
+                    email,
+                    "TEACHER",
+                    "granted",
+                    "Teacher access granted and the selected class assigned."
+            );
+        }
+
+        createRegistrationLink(
+                tenantId,
+                email,
+                "TEACHER",
+                "teacher_class_invitation",
+                classId
+        );
+        return new InviteUserResultResponse(
+                email,
+                "TEACHER",
+                "invited",
+                "Invitation email sent with a registration link."
+        );
+    }
+
+    private InviteUserResultResponse inviteParent(
+            UUID tenantId,
+            PublicSchoolResponse school,
+            String email,
+            UUID userId
+    ) {
+        if (userId != null && roleDao.hasTenantRole(userId, tenantId, "PARENT")) {
+            return new InviteUserResultResponse(
+                    email,
+                    "PARENT",
+                    "already_parent",
+                    "The user is already a school parent."
+            );
+        }
+
+        if (userId != null) {
+            roleDao.assignRole(userId, tenantId, "PARENT");
+            sendParentGrantedEmail(school, email);
+            return new InviteUserResultResponse(
+                    email,
+                    "PARENT",
+                    "granted",
+                    "Parent access granted and notification email sent."
+            );
+        }
+
+        createRegistrationLink(
+                tenantId,
+                email,
+                "PARENT",
+                "parent_invitation",
+                null
+        );
+        return new InviteUserResultResponse(
+                email,
+                "PARENT",
+                "invited",
+                "Invitation email sent with a registration link."
+        );
+    }
+
+    private void sendRegistrationLinkEmail(RegistrationLinkRow link, RegistrationLinkResponse response, String completionLink) {
         tenantDao.findActivePublicSchoolById(response.tenantId())
                 .ifPresent(school -> {
-                    String subject = "Complete your " + school.name() + " registration";
+                    String subject = "Complete your " + school.name() + " " + registrationLinkPurpose(response.intendedRole());
+                    String classNote = link.relatedInvitationId() != null && "TEACHER".equals(response.intendedRole())
+                            ? " After registration, you will be assigned to the selected class."
+                            : "";
+                    String classNoteText = classNote.isBlank() ? "" : "\n\n" + classNote.trim();
+                    String classNoteHtml = classNote.isBlank() ? "" : "<p>" + escapeHtml(classNote.trim()) + "</p>";
                     String textBody = """
                             Hello,
 
-                            Use this secure link to complete your SchoolDays registration for %s:
+                            Use this secure link to complete your SchoolDays %s for %s.
 
                             %s
 
-                            This link expires at %s.
-                            """.formatted(school.name(), completionLink, response.expiresAt());
+                            This link expires at %s.%s""".formatted(
+                            registrationLinkPurpose(response.intendedRole()),
+                            school.name(),
+                            completionLink,
+                            response.expiresAt(),
+                            classNoteText
+                    );
                     String htmlBody = """
                             <p>Hello,</p>
-                            <p>Use this secure link to complete your SchoolDays registration for %s:</p>
+                            <p>Use this secure link to complete your SchoolDays %s for %s.</p>
                             <p><a href="%s">Complete registration</a></p>
                             <p>This link expires at %s.</p>
-                            """.formatted(escapeHtml(school.name()), escapeHtml(completionLink), response.expiresAt());
+                            %s
+                            """.formatted(
+                            escapeHtml(registrationLinkPurpose(response.intendedRole())),
+                            escapeHtml(school.name()),
+                            escapeHtml(completionLink),
+                            response.expiresAt(),
+                            classNoteHtml
+                    );
 
                     systemEmailService.send(new SystemEmailMessage(
                             response.email(),
@@ -382,6 +593,142 @@ public class AuthService {
                             htmlBody
                     ));
                 });
+    }
+
+    private void sendSchoolAdminGrantedEmail(PublicSchoolResponse school, String email) {
+        String subject = "SchoolDays school administrator access for " + school.name();
+        String textBody = """
+                Hello,
+
+                You have been granted school administrator access for %s.
+
+                You can sign in to SchoolDays with your existing account.
+                """.formatted(school.name());
+        String htmlBody = """
+                <p>Hello,</p>
+                <p>You have been granted school administrator access for %s.</p>
+                <p>You can sign in to SchoolDays with your existing account.</p>
+                """.formatted(escapeHtml(school.name()));
+
+        systemEmailService.send(new SystemEmailMessage(
+                email,
+                systemEmailFromEmail,
+                school.name(),
+                subject,
+                textBody,
+                htmlBody
+        ));
+    }
+
+    private void sendParentGrantedEmail(PublicSchoolResponse school, String email) {
+        String subject = "SchoolDays parent access for " + school.name();
+        String textBody = """
+                Hello,
+
+                You have been granted parent access for %s.
+
+                You can sign in to SchoolDays with your existing account.
+                """.formatted(school.name());
+        String htmlBody = """
+                <p>Hello,</p>
+                <p>You have been granted parent access for %s.</p>
+                <p>You can sign in to SchoolDays with your existing account.</p>
+                """.formatted(escapeHtml(school.name()));
+
+        systemEmailService.send(new SystemEmailMessage(
+                email,
+                systemEmailFromEmail,
+                school.name(),
+                subject,
+                textBody,
+                htmlBody
+        ));
+    }
+
+    private void sendTeacherGrantedEmail(PublicSchoolResponse school, UUID tenantId, String email, UUID classId, boolean isAssignmentOnly) {
+        String className = dsl.select(CLASSES.NAME)
+                .from(CLASSES)
+                .where(CLASSES.TENANT_ID.eq(tenantId))
+                .and(CLASSES.ID.eq(classId))
+                .fetchOne(CLASSES.NAME);
+        if (className == null) {
+            className = "selected class";
+        }
+
+        String subject = "SchoolDays teacher access for " + school.name();
+        String textBody = isAssignmentOnly
+                ? """
+                        Hello,
+
+                        You have been assigned to the %s class at %s.
+
+                        You can sign in to SchoolDays with your existing account.
+                        """.formatted(className, school.name())
+                : """
+                        Hello,
+
+                        You have been granted teacher access for %s and assigned to the %s class.
+
+                        You can sign in to SchoolDays with your existing account.
+                        """.formatted(school.name(), className);
+        String htmlBody = isAssignmentOnly
+                ? """
+                        <p>Hello,</p>
+                        <p>You have been assigned to the %s class at %s.</p>
+                        <p>You can sign in to SchoolDays with your existing account.</p>
+                        """.formatted(escapeHtml(className), escapeHtml(school.name()))
+                : """
+                        <p>Hello,</p>
+                        <p>You have been granted teacher access for %s and assigned to the %s class.</p>
+                        <p>You can sign in to SchoolDays with your existing account.</p>
+                        """.formatted(escapeHtml(school.name()), escapeHtml(className));
+
+        systemEmailService.send(new SystemEmailMessage(
+                email,
+                systemEmailFromEmail,
+                school.name(),
+                subject,
+                textBody,
+                htmlBody
+        ));
+    }
+
+    private void requireClass(UUID tenantId, UUID classId) {
+        boolean classExists = dsl.fetchExists(dsl.selectOne()
+                .from(CLASSES)
+                .where(CLASSES.TENANT_ID.eq(tenantId))
+                .and(CLASSES.ID.eq(classId)));
+        if (!classExists) {
+            throw new InvalidAuthRequestException("Class was not found");
+        }
+    }
+
+    private boolean isTeacherAssignedToClass(UUID classId, UUID teacherUserId) {
+        return dsl.fetchExists(dsl.selectOne()
+                .from(TEACHER_ASSIGNMENTS)
+                .where(TEACHER_ASSIGNMENTS.CLASS_ID.eq(classId))
+                .and(TEACHER_ASSIGNMENTS.TEACHER_USER_ID.eq(teacherUserId)));
+    }
+
+    private void assignTeacherToClass(UUID tenantId, UUID classId, UUID teacherUserId, UUID assignedByUserId) {
+        requireClass(tenantId, classId);
+        dsl.insertInto(TEACHER_ASSIGNMENTS)
+                .set(TEACHER_ASSIGNMENTS.CLASS_ID, classId)
+                .set(TEACHER_ASSIGNMENTS.TEACHER_USER_ID, teacherUserId)
+                .set(TEACHER_ASSIGNMENTS.ASSIGNED_BY_USER_ID, assignedByUserId)
+                .onConflict(TEACHER_ASSIGNMENTS.CLASS_ID, TEACHER_ASSIGNMENTS.TEACHER_USER_ID)
+                .doNothing()
+                .execute();
+    }
+
+    private String registrationLinkPurpose(String intendedRole) {
+        String normalizedRole = normalizeRole(intendedRole);
+        return switch (normalizedRole) {
+            case "SCHOOL_ADMIN" -> "school administrator registration";
+            case "TEACHER" -> "teacher registration";
+            case "PARENT" -> "registration";
+            default -> "registration";
+        };
     }
 
     private String registrationCompletionLink(UUID tenantId, String token) {

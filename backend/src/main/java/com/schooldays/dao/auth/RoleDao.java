@@ -30,6 +30,11 @@ public class RoleDao {
                 .fetch(record -> new TenantRole(record.get(USER_ROLES.TENANT_ID), record.get(ROLES.NAME)));
     }
 
+    public boolean hasTenantRole(UUID userId, UUID tenantId, String roleName) {
+        return findTenantRoles(userId).stream()
+                .anyMatch(tenantRole -> tenantId.equals(tenantRole.tenantId()) && roleName.equals(tenantRole.role()));
+    }
+
     public void assignRole(UUID userId, UUID tenantId, String roleName) {
         UUID roleId = roleRepository.findByName(roleName)
                 .map(record -> record.getId())
