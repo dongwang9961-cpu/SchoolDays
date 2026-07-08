@@ -268,6 +268,14 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let checkInReminderOpen = false;
   let checkInReminderDismissed = false;
   let noticeTimer = null;
+  let checkInCameraStream = null;
+  let checkInScannerStarting = false;
+  let checkInScanning = false;
+  let checkInScannerTimer = null;
+  let checkInDetector = null;
+  let checkInAudioContext = null;
+  let checkInBarcodeValue = "";
+  let checkInScannerStatus = "Starting camera...";
 
   if (role === "SCHOOL_ADMIN") {
     loadSites();
@@ -290,8 +298,15 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
   function render() {
     scheduleNoticeDismissal();
+    if (!(role === "SCHOOL_ADMIN" && adminMode === "checkIn")) {
+      stopCheckInScanner();
+    }
     if (role === "SCHOOL_ADMIN" && !adminMode) {
       renderSchoolAdminLanding();
+      return;
+    }
+    if (role === "SCHOOL_ADMIN" && adminMode === "checkIn") {
+      renderSchoolAdminCheckIn();
       return;
     }
     if (role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
@@ -425,7 +440,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       });
     });
 
-    root.querySelector("[data-logout]").addEventListener("click", onLogout);
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
     root.querySelector("[data-profile-menu-toggle]")?.addEventListener("click", () => {
       const menu = root.querySelector("[data-profile-menu]");
       menu?.toggleAttribute("hidden");
@@ -869,13 +884,18 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                 }
               </div>
             </section>
+            <button class="admin-choice-card" data-admin-mode="checkIn" type="button">
+              <span>Check in</span>
+              <strong>Open camera check in</strong>
+              <small>Start a focused scanner screen with sign out only and show each detected barcode value.</small>
+            </button>
           </div>
           ${profileOpen ? profilePanel(profile, user, loadingProfile) : ""}
           ${noticeToast(notice)}
         </section>
       </main>
     `;
-    root.querySelector("[data-logout]").addEventListener("click", onLogout);
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
     root.querySelector("[data-profile-menu-toggle]")?.addEventListener("click", () => {
       const menu = root.querySelector("[data-profile-menu]");
       menu?.toggleAttribute("hidden");
@@ -947,7 +967,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         </section>
       </main>
     `;
-    root.querySelector("[data-logout]").addEventListener("click", onLogout);
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
     root.querySelector("[data-profile-menu-toggle]")?.addEventListener("click", () => {
       const menu = root.querySelector("[data-profile-menu]");
       menu?.toggleAttribute("hidden");
@@ -984,6 +1004,277 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         loadClasses();
       });
     });
+  }
+
+  function renderSchoolAdminCheckIn() {
+    root.innerHTML = `
+      <main class="admin-check-in-page">
+        <section class="admin-check-in-shell" aria-labelledby="admin-check-in-title">
+          <header class="admin-check-in-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(school.name)}</p>
+              <h2 id="admin-check-in-title">Check in</h2>
+            </div>
+            <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+          </header>
+
+          <section class="check-in-camera-panel">
+            <aside class="check-in-result-panel" aria-live="polite">
+              <div>
+                <span class="check-in-result-label">Barcode value</span>
+                <strong data-check-in-barcode-value>${escapeHtml(checkInBarcodeValue || "Waiting for barcode")}</strong>
+              </div>
+              <div class="check-in-status-block">
+                <span class="check-in-result-label">Barcode status</span>
+                <p class="check-in-status" data-check-in-status>${escapeHtml(checkInScannerStatus)}</p>
+              </div>
+            </aside>
+            <div class="check-in-video-frame">
+              <video autoplay muted playsinline data-check-in-video></video>
+              <div class="check-in-target" aria-hidden="true"></div>
+            </div>
+          </section>
+        </section>
+      </main>
+    `;
+
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    startCheckInScanner();
+  }
+
+  function handleLogout() {
+    stopCheckInScanner();
+    onLogout();
+  }
+
+  async function startCheckInScanner() {
+    if (checkInCameraStream) {
+      attachCheckInCameraStream();
+      if (checkInDetector && !checkInScanning) {
+        checkInScanning = true;
+        scheduleCheckInScan();
+      }
+      return;
+    }
+    if (checkInScannerStarting) {
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      updateCheckInStatus("Camera access is not available in this browser.", true);
+      return;
+    }
+
+    checkInScannerStarting = true;
+    checkInBarcodeValue = "";
+    updateCheckInBarcodeValue("");
+    updateCheckInStatus("Starting camera...");
+
+    try {
+      checkInCameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+        },
+      });
+      attachCheckInCameraStream();
+    } catch (cameraError) {
+      stopCheckInScanner();
+      updateCheckInStatus(scannerErrorMessage(cameraError), true);
+      return;
+    } finally {
+      checkInScannerStarting = false;
+    }
+
+    if (!("BarcodeDetector" in window)) {
+      updateCheckInStatus("Barcode detection is not supported in this browser.", true);
+      return;
+    }
+
+    try {
+      checkInDetector = await createCheckInBarcodeDetector();
+    } catch (detectorError) {
+      updateCheckInStatus("Barcode detector could not be started in this browser.", true);
+      return;
+    }
+
+    checkInScanning = true;
+    updateCheckInStatus("Scanning for barcodes...");
+    scheduleCheckInScan();
+  }
+
+  function attachCheckInCameraStream() {
+    const video = root.querySelector("[data-check-in-video]");
+    if (!video || !checkInCameraStream) {
+      return;
+    }
+    if (video.srcObject !== checkInCameraStream) {
+      video.srcObject = checkInCameraStream;
+    }
+    video.play().catch(() => {
+      updateCheckInStatus("Camera video is ready but playback was blocked.", true);
+    });
+  }
+
+  async function createCheckInBarcodeDetector() {
+    const Detector = window.BarcodeDetector;
+    const requestedFormats = [
+      "aztec",
+      "codabar",
+      "code_39",
+      "code_93",
+      "code_128",
+      "data_matrix",
+      "ean_8",
+      "ean_13",
+      "itf",
+      "pdf417",
+      "qr_code",
+      "upc_a",
+      "upc_e",
+    ];
+    if (typeof Detector.getSupportedFormats !== "function") {
+      return barcodeDetectorWithFormats(Detector, requestedFormats);
+    }
+
+    const supportedFormats = await Detector.getSupportedFormats();
+    const formats = requestedFormats.filter((format) => supportedFormats.includes(format));
+    return barcodeDetectorWithFormats(Detector, formats);
+  }
+
+  function barcodeDetectorWithFormats(Detector, formats) {
+    try {
+      return formats.length ? new Detector({ formats }) : new Detector();
+    } catch (formatError) {
+      return new Detector();
+    }
+  }
+
+  async function scanCheckInFrame() {
+    if (!checkInScanning || !checkInDetector) {
+      return;
+    }
+
+    const video = root.querySelector("[data-check-in-video]");
+    if (!video || video.readyState < 2) {
+      scheduleCheckInScan();
+      return;
+    }
+
+    try {
+      const barcodes = await checkInDetector.detect(video);
+      const barcode = barcodes[0] || null;
+      const value = barcode?.rawValue || "";
+      if (barcode?.format === "qr_code" && value && value !== checkInBarcodeValue) {
+        playCheckInQrSound();
+      }
+      if (value && value !== checkInBarcodeValue) {
+        checkInBarcodeValue = value;
+        updateCheckInBarcodeValue(value);
+        updateCheckInStatus("Barcode detected.");
+      } else if (!checkInBarcodeValue) {
+        updateCheckInStatus("Scanning for barcodes...");
+      }
+    } catch (scanError) {
+      updateCheckInStatus("Barcode scanner could not read the camera frame.", true);
+    }
+
+    scheduleCheckInScan();
+  }
+
+  function scheduleCheckInScan() {
+    if (!checkInScanning) {
+      return;
+    }
+    if (checkInScannerTimer) {
+      clearTimeout(checkInScannerTimer);
+    }
+    checkInScannerTimer = window.setTimeout(() => {
+      checkInScannerTimer = null;
+      scanCheckInFrame();
+    }, 250);
+  }
+
+  function stopCheckInScanner() {
+    checkInScanning = false;
+    checkInScannerStarting = false;
+    checkInDetector = null;
+    if (checkInScannerTimer) {
+      clearTimeout(checkInScannerTimer);
+      checkInScannerTimer = null;
+    }
+    if (checkInCameraStream) {
+      checkInCameraStream.getTracks().forEach((track) => track.stop());
+      checkInCameraStream = null;
+    }
+    const video = root.querySelector("[data-check-in-video]");
+    if (video) {
+      video.srcObject = null;
+    }
+  }
+
+  function playCheckInQrSound() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return;
+    }
+
+    if (!checkInAudioContext) {
+      checkInAudioContext = new AudioContextClass();
+    }
+
+    if (checkInAudioContext.state === "suspended") {
+      checkInAudioContext.resume().catch(() => {});
+    }
+
+    const now = checkInAudioContext.currentTime;
+    const gain = checkInAudioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.24, now + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.18);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.48);
+    gain.connect(checkInAudioContext.destination);
+
+    [880, 1175].forEach((frequency, index) => {
+      const oscillator = checkInAudioContext.createOscillator();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.2);
+      oscillator.connect(gain);
+      oscillator.start(now + index * 0.2);
+      oscillator.stop(now + 0.5);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+      };
+    });
+    window.setTimeout(() => {
+      gain.disconnect();
+    }, 600);
+  }
+
+  function updateCheckInBarcodeValue(value) {
+    const label = root.querySelector("[data-check-in-barcode-value]");
+    if (label) {
+      label.textContent = value || "Waiting for barcode";
+    }
+  }
+
+  function updateCheckInStatus(message, isError = false) {
+    checkInScannerStatus = message;
+    const status = root.querySelector("[data-check-in-status]");
+    if (status) {
+      status.textContent = message;
+      status.classList.toggle("is-error", isError);
+    }
+  }
+
+  function scannerErrorMessage(cameraError) {
+    if (cameraError?.name === "NotAllowedError") {
+      return "Camera permission was denied.";
+    }
+    if (cameraError?.name === "NotFoundError") {
+      return "No camera was found on this device.";
+    }
+    return "Camera could not be started.";
   }
 
   async function loadSites() {
@@ -3251,6 +3542,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       <div class="app-mode-switcher">
         <button class="${adminMode === "manage" ? "is-active" : ""}" data-admin-mode="manage" type="button">School setup</button>
         <button class="${adminMode === "site" ? "is-active" : ""}" data-admin-mode="site" type="button">Site workspace</button>
+        <button class="${adminMode === "checkIn" ? "is-active" : ""}" data-admin-mode="checkIn" type="button">Check in</button>
       </div>
     `;
   }
