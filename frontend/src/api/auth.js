@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client.js";
+import { apiGet, apiPost, apiPostForm } from "./client.js";
 
 export function login({ email, password }) {
   return apiPost("/api/auth/login", { email, password }, { auth: false });
@@ -18,6 +18,12 @@ export function inviteUsers({ tenantId, role, emails, classId }) {
     emails,
     classId,
   });
+}
+
+export function importExternalStudents({ tenantId, file }) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiPostForm(`/api/tenants/${encodeURIComponent(tenantId)}/external-students/import`, formData);
 }
 
 export function getAuthConfig() {

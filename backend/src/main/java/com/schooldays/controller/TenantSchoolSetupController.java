@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.schooldays.dto.api.EndpointStatusResponse;
+import com.schooldays.dto.externalstudent.ExternalStudentImportResponse;
 import com.schooldays.dto.auth.InviteUserRequest;
 import com.schooldays.dto.auth.InviteUserResponse;
 import com.schooldays.dto.classroom.ClassListResponse;
@@ -22,6 +23,7 @@ import com.schooldays.dto.site.SiteResponse;
 import com.schooldays.dto.site.UpdateSiteRequest;
 import com.schooldays.dto.student.StudentRosterResponse;
 import com.schooldays.service.auth.AuthService;
+import com.schooldays.service.externalstudent.ExternalStudentImportService;
 import com.schooldays.service.classroom.ClassService;
 import com.schooldays.service.pricing.ClassPricingService;
 import com.schooldays.service.program.ProgramService;
@@ -31,6 +33,8 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -49,6 +53,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     private final ClassService classService;
     private final ClassPricingService classPricingService;
     private final StudentRosterService studentRosterService;
+    private final ExternalStudentImportService externalStudentImportService;
     private final AuthService authService;
 
     public TenantSchoolSetupController(
@@ -57,6 +62,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             ClassService classService,
             ClassPricingService classPricingService,
             StudentRosterService studentRosterService,
+            ExternalStudentImportService externalStudentImportService,
             AuthService authService
     ) {
         this.siteService = siteService;
@@ -64,6 +70,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
         this.classService = classService;
         this.classPricingService = classPricingService;
         this.studentRosterService = studentRosterService;
+        this.externalStudentImportService = externalStudentImportService;
         this.authService = authService;
     }
 
@@ -146,6 +153,15 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             Authentication authentication
     ) {
         return ResponseEntity.ok(authService.inviteUsers(tenantId, userId(authentication), request));
+    }
+
+    @PostMapping(value = "/external-students/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<ExternalStudentImportResponse> importExternalStudents(
+            @PathVariable("tenantId") UUID tenantId,
+            @RequestParam("file") MultipartFile file
+    ) {
+        return ResponseEntity.ok(externalStudentImportService.importStudents(tenantId, file));
     }
 
     @PostMapping("/classes")

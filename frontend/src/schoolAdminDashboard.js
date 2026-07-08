@@ -1,6 +1,6 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
-import { inviteUsers } from "./api/auth.js";
+import { importExternalStudents, inviteUsers } from "./api/auth.js";
 import { checkInAttendance, getClassAttendanceGrid, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, stopClass, updateClass } from "./api/classes.js";
@@ -278,6 +278,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let inviteUserClassesLoadedForSiteId = "";
   let loadingInviteUserClasses = false;
   let checkInFlowStage = "intro";
+  let checkInImportFile = null;
+  let checkInImportMessage = "";
+  let checkInImportError = "";
+  let checkInImportSubmitting = false;
   let checkInReminderOpen = false;
   let checkInReminderDismissed = false;
   let noticeTimer = null;
@@ -951,6 +955,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         error = "";
         if (adminMode !== "checkIn") {
           checkInFlowStage = "intro";
+          checkInImportFile = null;
+          checkInImportMessage = "";
+          checkInImportError = "";
+          checkInImportSubmitting = false;
         }
         render();
       });
@@ -1237,6 +1245,22 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
           <section class="standalone-panel check-in-launch-panel">
             <p class="context-note">Open the camera check-in screen when you are ready to start scanning.</p>
+            <form class="check-in-import-form" data-check-in-import-form>
+              <label class="check-in-import-field">
+                <span>Import external students</span>
+                <input
+                  accept=".csv,.xlsx,.xls,.xlsm,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  data-check-in-import-file
+                  type="file"
+                />
+              </label>
+              <p class="check-in-import-file-name">${escapeHtml(checkInImportFile?.name || "No file selected")}</p>
+              ${checkInImportError ? `<p class="message error" role="alert">${escapeHtml(checkInImportError)}</p>` : ""}
+              ${checkInImportMessage ? `<p class="message success" role="status">${escapeHtml(checkInImportMessage)}</p>` : ""}
+              <button class="secondary-button compact-button" data-check-in-import-submit type="submit">
+                ${checkInImportSubmitting ? "Importing..." : "Import file"}
+              </button>
+            </form>
             <button class="check-in-launch-button" data-check-in-start type="button">Check In</button>
           </section>
         </section>
@@ -1253,11 +1277,53 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       checkInFlowStage = "camera";
       render();
     });
+    root.querySelector("[data-check-in-import-file]")?.addEventListener("change", (event) => {
+      checkInImportFile = event.currentTarget.files?.[0] || null;
+      checkInImportError = "";
+      checkInImportMessage = "";
+      render();
+    });
+    root.querySelector("[data-check-in-import-form]")?.addEventListener("submit", handleCheckInImportSubmit);
   }
 
   function handleLogout() {
     stopCheckInScanner();
     onLogout();
+  }
+
+  async function handleCheckInImportSubmit(event) {
+    event.preventDefault();
+    if (!checkInImportFile) {
+      checkInImportError = "Choose a CSV or Excel file first.";
+      checkInImportMessage = "";
+      render();
+      return;
+    }
+
+    checkInImportSubmitting = true;
+    checkInImportError = "";
+    checkInImportMessage = "";
+    render();
+
+    try {
+      const response = await importExternalStudents({
+        tenantId: school.tenantId,
+        file: checkInImportFile,
+      });
+      const summaryParts = [
+        `${response.importedCount || 0} imported`,
+        `${response.updatedCount || 0} updated`,
+        `${response.skippedCount || 0} skipped`,
+      ];
+      checkInImportMessage = `Import complete: ${summaryParts.join(", ")}.`;
+      checkInImportFile = null;
+    } catch (importError) {
+      checkInImportMessage = "";
+      checkInImportError = importError instanceof Error ? importError.message : "Import could not be completed.";
+    } finally {
+      checkInImportSubmitting = false;
+      render();
+    }
   }
 
   function initializeInviteUserPage() {

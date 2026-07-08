@@ -2140,6 +2140,28 @@ button:disabled {
   padding: 22px;
 }
 
+.check-in-import-form {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+
+.check-in-import-field {
+  display: grid;
+  gap: 8px;
+}
+
+.check-in-import-field span {
+  color: #344258;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.check-in-import-file-name {
+  color: #5f6f86;
+  margin: 0;
+}
+
 .check-in-launch-button {
   background: #ffffff;
   border: 0;

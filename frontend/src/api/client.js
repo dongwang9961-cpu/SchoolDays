@@ -43,6 +43,30 @@ export async function apiPost(path, body, options = {}) {
   return response.json();
 }
 
+export async function apiPostForm(path, formData, options = {}) {
+  const headers = {};
+  const accessToken = localStorage.getItem("schooldays.accessToken");
+  if (options.auth !== false && accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  const response = await fetch(apiUrl(path), {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+
+  if (!response.ok) {
+    await handleFailedResponse(response, options);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
+}
+
 export async function apiPatch(path, body, options = {}) {
   const response = await fetch(apiUrl(path), {
     method: "PATCH",
