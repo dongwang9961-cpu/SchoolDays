@@ -277,6 +277,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let inviteUserClasses = [];
   let inviteUserClassesLoadedForSiteId = "";
   let loadingInviteUserClasses = false;
+  let checkInFlowStage = "intro";
   let checkInReminderOpen = false;
   let checkInReminderDismissed = false;
   let noticeTimer = null;
@@ -310,14 +311,18 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
   function render() {
     scheduleNoticeDismissal();
-    if (!(role === "SCHOOL_ADMIN" && adminMode === "checkIn")) {
+    if (!(role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "camera")) {
       stopCheckInScanner();
     }
     if (role === "SCHOOL_ADMIN" && !adminMode) {
       renderSchoolAdminLanding();
       return;
     }
-    if (role === "SCHOOL_ADMIN" && adminMode === "checkIn") {
+    if (role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage !== "camera") {
+      renderSchoolAdminCheckInIntro();
+      return;
+    }
+    if (role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "camera") {
       renderSchoolAdminCheckIn();
       return;
     }
@@ -907,8 +912,8 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             </section>
             <button class="admin-choice-card" data-admin-mode="checkIn" type="button">
               <span>Check in</span>
-              <strong>Open camera check in</strong>
-              <small>Start a focused scanner screen with sign out only and show each detected barcode value.</small>
+              <strong>Open Camera Check-In</strong>
+              <small>Open the check-in flow and start the camera from the next screen.</small>
             </button>
             <button class="admin-choice-card" data-admin-mode="inviteUser" type="button">
               <span>Invite New User</span>
@@ -944,6 +949,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
         activeOperation = "";
         notice = "";
         error = "";
+        if (adminMode !== "checkIn") {
+          checkInFlowStage = "intro";
+        }
         render();
       });
     });
@@ -1210,6 +1218,41 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
     root.querySelector("[data-logout]").addEventListener("click", handleLogout);
     startCheckInScanner();
+  }
+
+  function renderSchoolAdminCheckInIntro() {
+    root.innerHTML = `
+      <main class="admin-choice-page check-in-intro-page">
+        <section class="admin-choice-shell" aria-labelledby="admin-check-in-title">
+          <header class="app-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(school.name)}</p>
+              <h2 id="admin-check-in-title">Check in</h2>
+            </div>
+            <div class="header-actions">
+              <button class="secondary-button compact-button" data-admin-mode="" type="button">Back</button>
+              <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+            </div>
+          </header>
+
+          <section class="standalone-panel check-in-launch-panel">
+            <p class="context-note">Open the camera check-in screen when you are ready to start scanning.</p>
+            <button class="check-in-launch-button" data-check-in-start type="button">Check In</button>
+          </section>
+        </section>
+      </main>
+    `;
+
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    root.querySelector("[data-admin-mode]")?.addEventListener("click", () => {
+      adminMode = "";
+      checkInFlowStage = "intro";
+      render();
+    });
+    root.querySelector("[data-check-in-start]")?.addEventListener("click", () => {
+      checkInFlowStage = "camera";
+      render();
+    });
   }
 
   function handleLogout() {
