@@ -334,6 +334,9 @@ public class AuthService {
         if (emails.isEmpty()) {
             throw new InvalidAuthRequestException("At least one email address is required");
         }
+        if (Set.of("SCHOOL_ADMIN", "TEACHER").contains(role) && !roleDao.hasTenantRole(invitedByUserId, tenantId, "SCHOOL_ADMIN")) {
+            throw new InvalidAuthRequestException("Only school administrators can send invitations for school administrator or teacher roles");
+        }
         if ("TEACHER".equals(role)) {
             if (request.classId() == null) {
                 throw new InvalidAuthRequestException("A class must be selected for teacher invitations");
@@ -445,7 +448,7 @@ public class AuthService {
                 expiresAt,
                 now
         );
-        String completionLink = registrationCompletionLink(link.tenantId(), token);
+        String completionLink = registrationCompletionLink(link.tenantId(), link.intendedRole(), token);
         RegistrationLinkResponse response = new RegistrationLinkResponse(
                 link.tenantId(),
                 link.email(),
@@ -826,13 +829,18 @@ public class AuthService {
         };
     }
 
-    private String registrationCompletionLink(UUID tenantId, String token) {
+    private String registrationCompletionLink(UUID tenantId, String intendedRole, String token) {
         String encodedToken = urlEncode(token);
         if (tenantId == null) {
             return publicBaseUrl + "?token=" + encodedToken;
         }
+        String portalPath = switch (normalizeRole(intendedRole)) {
+            case "TEACHER" -> "/t";
+            case "SCHOOL_ADMIN" -> "/admin";
+            default -> "";
+        };
         return tenantDao.findActivePublicSchoolById(tenantId)
-                .map(school -> publicBaseUrl + "/school/" + urlEncode(school.slug()) + "?token=" + encodedToken)
+                .map(school -> publicBaseUrl + "/school/" + urlEncode(school.slug()) + portalPath + "?token=" + encodedToken)
                 .orElse(publicBaseUrl + "?token=" + encodedToken);
     }
 

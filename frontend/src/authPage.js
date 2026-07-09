@@ -1,6 +1,4 @@
 import {
-  acceptTeacherInvitation,
-  acceptTenantInvitation,
   completeRegistration,
   getAuthConfig,
   login,
@@ -149,11 +147,8 @@ export function renderAuthPage({
       };
     }
 
-    if (mode === "teacher") {
-      return acceptTeacherInvitation(request);
-    }
-    if (mode === "school") {
-      return acceptTenantInvitation(request);
+    if (mode === "teacher" || mode === "school") {
+      return completeRegistration(request);
     }
     return completeRegistration(request);
   }
