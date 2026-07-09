@@ -4889,25 +4889,18 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
             </div>
           </header>
 
-          <section class="workspace-panel">
-            <div class="workspace-heading">
-              <h3>Main UI</h3>
-              <p>Open your class dashboard, schedules, attendance, and notifications.</p>
-            </div>
-            <div class="operation-actions">
-              <button data-teacher-enter-main type="button">Open main UI</button>
-            </div>
-          </section>
-
-          <section class="workspace-panel">
-            <div class="workspace-heading">
-              <h3>Check in</h3>
-              <p>Choose a class and launch the camera check-in flow.</p>
-            </div>
-            <div class="operation-actions">
-              <button data-teacher-enter-check-in type="button">Open check-in</button>
-            </div>
-          </section>
+          <div class="admin-choice-grid">
+            <button class="admin-choice-card" data-teacher-enter-main type="button">
+              <span>Main UI</span>
+              <strong>Open classroom workspace</strong>
+              <small>Review your assigned classes, schedules, attendance, and notifications.</small>
+            </button>
+            <button class="admin-choice-card" data-teacher-enter-check-in type="button">
+              <span>Check in</span>
+              <strong>Open camera check-in</strong>
+              <small>Choose one of your classes and start the check-in camera flow.</small>
+            </button>
+          </div>
         </section>
       </main>
     `;
@@ -4945,13 +4938,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
             </div>
           </header>
 
-          <section class="standalone-panel check-in-launch-panel">
-            <div class="check-in-action-group">
-              <div class="check-in-action-group-header">
-                <h3>Camera check-in</h3>
-                <p>Pick one of your classes, then start the camera.</p>
-              </div>
-              <div class="check-in-selector-grid">
+          <div class="admin-choice-grid">
+            <section class="admin-choice-card teacher-check-in-card">
+              <span>Camera check-in</span>
+              <strong>Choose a class and start</strong>
+              <small>Pick one of your assigned classes, then open the camera check-in flow.</small>
+              <div class="teacher-check-in-card-body">
                 <label class="check-in-selector-field">
                   <span>Class</span>
                   <select data-teacher-check-in-class-select ${loadingClasses ? "disabled" : ""}>
@@ -4959,15 +4951,15 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                     ${classes.map((classRecord) => `<option value="${escapeHtml(classRecord.id)}"${classRecord.id === selectedClassId ? " selected" : ""}>${escapeHtml(classRecord.name)}</option>`).join("")}
                   </select>
                 </label>
+                ${checkInSelectionError ? `<p class="message error" role="alert">${escapeHtml(checkInSelectionError)}</p>` : ""}
+                <p class="check-in-today-count">${escapeHtml(renderTodayCheckInCountText())}</p>
+                <div class="check-in-launch-actions">
+                  <button class="check-in-launch-button" data-teacher-check-in-start type="button" ${!selectedClassId ? "disabled" : ""}>Check In</button>
+                  <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedClassId ? "disabled" : ""}>Today's check-in list</button>
+                </div>
               </div>
-              ${checkInSelectionError ? `<p class="message error" role="alert">${escapeHtml(checkInSelectionError)}</p>` : ""}
-              <p class="check-in-today-count">${escapeHtml(renderTodayCheckInCountText())}</p>
-              <div class="check-in-launch-actions">
-                <button class="check-in-launch-button" data-teacher-check-in-start type="button" ${!selectedClassId ? "disabled" : ""}>Check In</button>
-                <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedClassId ? "disabled" : ""}>Today's check-in list</button>
-              </div>
-            </div>
-          </section>
+            </section>
+          </div>
         </section>
       </main>
       ${checkInTodayListOpen ? renderCheckInTodayListModal() : ""}
@@ -5002,6 +4994,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       render();
     });
     root.querySelector("[data-check-in-today-list]")?.addEventListener("click", handleShowTodayCheckIns);
+    root.querySelector("[data-check-in-today-list-close]")?.addEventListener("click", closeTodayCheckInsModal);
+    root.querySelector("[data-check-in-today-list-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeTodayCheckInsModal();
+      }
+    });
   }
 
   function renderTeacherCheckIn() {
@@ -5046,6 +5044,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     `;
 
     root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    root.querySelector("[data-check-in-today-list-close]")?.addEventListener("click", closeTodayCheckInsModal);
+    root.querySelector("[data-check-in-today-list-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeTodayCheckInsModal();
+      }
+    });
     startCheckInScanner();
   }
 }
