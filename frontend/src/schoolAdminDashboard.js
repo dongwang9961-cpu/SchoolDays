@@ -1,7 +1,7 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
 import { importExternalStudents, inviteUsers, listExternalStudents } from "./api/auth.js";
-import { checkInAttendance, getClassAttendanceGrid, listParentAttendance } from "./api/attendance.js";
+import { checkInAttendance, checkInExternalStudent, getClassAttendanceGrid, listExternalCheckIns, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, stopClass, updateClass } from "./api/classes.js";
 import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
@@ -279,6 +279,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let inviteUserClassesLoadedForSiteId = "";
   let loadingInviteUserClasses = false;
   let checkInFlowStage = "intro";
+  let checkInSelectionError = "";
   let checkInImportFile = null;
   let checkInImportMessage = "";
   let checkInImportError = "";
@@ -294,17 +295,28 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let checkInStudentsPageSize = 25;
   let checkInStudentsTotalRows = 0;
   let checkInStudentsTotalPages = 1;
+  let checkInTodayListOpen = false;
+  let checkInTodayListLoading = false;
+  let checkInTodayListRows = [];
+  let checkInTodayListCount = 0;
+  let checkInTodayListError = "";
+  let checkInTodayListDate = "";
+  let checkInTodayListQueryKey = "";
   let checkInReminderOpen = false;
   let checkInReminderDismissed = false;
   let noticeTimer = null;
-  let checkInCameraStream = null;
-  let checkInScannerStarting = false;
-  let checkInScanning = false;
-  let checkInScannerTimer = null;
-  let checkInDetector = null;
-  let checkInAudioContext = null;
-  let checkInBarcodeValue = "";
-  let checkInScannerStatus = "Starting camera...";
+let checkInCameraStream = null;
+let checkInScannerStarting = false;
+let checkInScanning = false;
+let checkInScannerTimer = null;
+let checkInDetector = null;
+let checkInAudioContext = null;
+let checkInBarcodeValue = "";
+let checkInLastRawBarcodeValue = "";
+let checkInExternalCheckInSubmitting = false;
+let checkInScannerStatus = "Starting camera...";
+const classListCache = new Map();
+const CLASS_LIST_CACHE_TTL_MS = 5000;
 
   if (role === "SCHOOL_ADMIN") {
     loadSites();
@@ -976,6 +988,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
           checkInImportSubmitting = false;
         }
         render();
+        if (adminMode === "checkIn" && selectedSiteId && !loadingClasses) {
+          loadClasses();
+        }
       });
     });
     root.querySelectorAll("[data-site-login-id]").forEach((button) => {
@@ -1208,6 +1223,8 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   }
 
   function renderSchoolAdminCheckIn() {
+    const currentSite = selectedSite();
+    const currentClass = selectedClass();
     root.innerHTML = `
       <main class="admin-check-in-page">
         <section class="admin-check-in-shell" aria-labelledby="admin-check-in-title">
@@ -1215,6 +1232,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             <div>
               <p class="eyebrow">${escapeHtml(school.name)}</p>
               <h2 id="admin-check-in-title">Check in</h2>
+              <p class="check-in-context-line">
+                ${escapeHtml(currentSite ? `${currentSite.name}` : "Choose a site")}
+                ${currentClass ? ` / ${escapeHtml(currentClass.name)}` : ""}
+              </p>
             </div>
             <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
           </header>
@@ -1225,9 +1246,14 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
                 <span class="check-in-result-label">Barcode value</span>
                 <strong data-check-in-barcode-value>${escapeHtml(checkInBarcodeValue || "Waiting for barcode")}</strong>
               </div>
+              <p class="check-in-result-site">${escapeHtml(currentSite ? `Site: ${currentSite.name}` : "No site selected")}${currentClass ? ` - Class: ${currentClass.name}` : ""}</p>
               <div class="check-in-status-block">
                 <span class="check-in-result-label">Barcode status</span>
                 <p class="check-in-status" data-check-in-status>${escapeHtml(checkInScannerStatus)}</p>
+              </div>
+              <div class="check-in-status-block">
+                <span class="check-in-result-label">Today's check-ins</span>
+                <p class="check-in-status">${escapeHtml(renderTodayCheckInCountText())}</p>
               </div>
             </aside>
             <div class="check-in-video-frame">
@@ -1244,6 +1270,11 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   }
 
   function renderSchoolAdminCheckInIntro() {
+    if (!loadingSites && !sites.length) {
+      loadSites();
+    }
+    const selectedSiteRecord = selectedSite();
+    const selectedClassRecord = selectedClass();
     root.innerHTML = `
       <main class="admin-choice-page check-in-intro-page">
         <section class="admin-choice-shell" aria-labelledby="admin-check-in-title">
@@ -1251,6 +1282,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             <div>
               <p class="eyebrow">${escapeHtml(school.name)}</p>
               <h2 id="admin-check-in-title">Check in</h2>
+              <p class="context-note check-in-context-note">
+                ${escapeHtml(selectedSiteRecord ? `Site: ${selectedSiteRecord.name}` : "Select a site and class before starting the camera check-in flow.")}
+                ${selectedClassRecord ? ` Current class: ${selectedClassRecord.name}.` : ""}
+              </p>
             </div>
             <div class="header-actions">
               <button class="secondary-button compact-button" data-admin-mode="" type="button">Back</button>
@@ -1259,45 +1294,120 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
           </header>
 
           <section class="standalone-panel check-in-launch-panel">
-            <p class="context-note">Open the camera check-in screen when you are ready to start scanning.</p>
-            <form class="check-in-import-form" data-check-in-import-form>
-              <label class="check-in-import-field">
-                <span>Import external students</span>
-                <input
-                  accept=".csv,.xlsx,.xls,.xlsm,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  data-check-in-import-file
-                  type="file"
-                />
-              </label>
-              <p class="check-in-import-file-name" data-check-in-import-file-name>${escapeHtml(checkInImportFile?.name || "No file selected")}</p>
-              ${checkInImportError ? `<p class="message error" role="alert">${escapeHtml(checkInImportError)}</p>` : ""}
-              ${checkInImportMessage ? `<p class="message success" role="status">${escapeHtml(checkInImportMessage)}</p>` : ""}
-              <button class="secondary-button compact-button" data-check-in-import-submit type="submit">
-                ${checkInImportSubmitting ? "Importing..." : "Import file"}
-              </button>
-            </form>
-            <div class="check-in-launch-actions">
-              <button class="secondary-button compact-button" data-check-in-show-all type="button">
-                ${checkInStudentsLoading ? "Loading..." : "Show all"}
-              </button>
-              <button class="check-in-launch-button" data-check-in-start type="button">Check In</button>
+            <div class="check-in-action-group">
+              <div class="check-in-action-group-header">
+                <h3>Camera check-in</h3>
+                <p>Select a site and class, then start the camera.</p>
+              </div>
+              <div class="check-in-selector-grid">
+                <label class="check-in-selector-field">
+                  <span>Site</span>
+                  <select data-check-in-site-select ${loadingSites ? "disabled" : ""}>
+                    <option value="">Select site</option>
+                    ${sites.map((site) => `<option value="${escapeHtml(site.id)}"${site.id === selectedSiteId ? " selected" : ""}>${escapeHtml(site.name)}</option>`).join("")}
+                  </select>
+                </label>
+                <label class="check-in-selector-field">
+                  <span>Class</span>
+                  <select data-check-in-class-select ${!selectedSiteId || loadingClasses ? "disabled" : ""}>
+                    <option value="">Select class</option>
+                    ${classes.map((classRecord) => `<option value="${escapeHtml(classRecord.id)}"${classRecord.id === selectedClassId ? " selected" : ""}>${escapeHtml(classRecord.name)}</option>`).join("")}
+                  </select>
+                </label>
+              </div>
+              ${checkInSelectionError ? `<p class="message error" role="alert">${escapeHtml(checkInSelectionError)}</p>` : ""}
+              <p class="check-in-today-count">${escapeHtml(renderTodayCheckInCountText())}</p>
+              <div class="check-in-launch-actions">
+                <button class="check-in-launch-button" data-check-in-start type="button" ${!selectedSiteId || !selectedClassId ? "disabled" : ""}>Check In</button>
+                <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedSiteId || !selectedClassId ? "disabled" : ""}>Today's check-in list</button>
+              </div>
+            </div>
+
+            <div class="check-in-action-group">
+              <div class="check-in-action-group-header">
+                <h3>Import students</h3>
+                <p>Upload CSV or Excel files into external students.</p>
+              </div>
+              <form class="check-in-import-form" data-check-in-import-form>
+                <label class="check-in-import-field">
+                  <span>File</span>
+                  <input
+                    accept=".csv,.xlsx,.xls,.xlsm,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    data-check-in-import-file
+                    type="file"
+                  />
+                </label>
+                <p class="check-in-import-file-name" data-check-in-import-file-name>${escapeHtml(checkInImportFile?.name || "No file selected")}</p>
+                ${checkInImportError ? `<p class="message error" role="alert">${escapeHtml(checkInImportError)}</p>` : ""}
+                ${checkInImportMessage ? `<p class="message success" role="status">${escapeHtml(checkInImportMessage)}</p>` : ""}
+                <div class="check-in-launch-actions">
+                  <button class="secondary-button compact-button" data-check-in-import-submit type="submit">
+                    ${checkInImportSubmitting ? "Importing..." : "Import file"}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="check-in-action-group check-in-action-group-compact">
+              <div class="check-in-action-group-header">
+                <h3>Student list</h3>
+                <p>Open the spreadsheet view of imported students.</p>
+              </div>
+              <div class="check-in-launch-actions">
+                <button class="secondary-button compact-button" data-check-in-show-all type="button">
+                  ${checkInStudentsLoading ? "Loading..." : "Show all"}
+                </button>
+              </div>
             </div>
           </section>
         </section>
       </main>
       ${checkInStudentsOpen ? renderCheckInStudentsModal() : ""}
+      ${checkInTodayListOpen ? renderCheckInTodayListModal() : ""}
     `;
 
     root.querySelector("[data-logout]").addEventListener("click", handleLogout);
     root.querySelector("[data-admin-mode]")?.addEventListener("click", () => {
       adminMode = "";
       checkInFlowStage = "intro";
+      checkInSelectionError = "";
       render();
     });
+    root.querySelector("[data-check-in-site-select]")?.addEventListener("change", (event) => {
+      selectedSiteId = event.currentTarget.value;
+      selectedClassId = "";
+      checkInSelectionError = "";
+      checkInTodayListRows = [];
+      checkInTodayListCount = 0;
+      checkInTodayListQueryKey = "";
+      checkInTodayListDate = "";
+      render();
+      if (selectedSiteId) {
+        loadClasses();
+      }
+    });
+    root.querySelector("[data-check-in-class-select]")?.addEventListener("change", (event) => {
+      selectedClassId = event.currentTarget.value;
+      checkInSelectionError = "";
+      checkInTodayListRows = [];
+      checkInTodayListCount = 0;
+      checkInTodayListQueryKey = "";
+      checkInTodayListDate = "";
+      render();
+      if (selectedSiteId && selectedClassId) {
+        loadTodayCheckIns();
+      }
+    });
     root.querySelector("[data-check-in-start]")?.addEventListener("click", () => {
+      if (!selectedSiteId || !selectedClassId) {
+        checkInSelectionError = "Select a site and class before starting check-in.";
+        render();
+        return;
+      }
       checkInFlowStage = "camera";
       render();
     });
+    root.querySelector("[data-check-in-today-list]")?.addEventListener("click", handleShowTodayCheckIns);
     root.querySelector("[data-check-in-show-all]")?.addEventListener("click", handleShowCheckInStudents);
     root.querySelector("[data-check-in-import-file]")?.addEventListener("change", (event) => {
       checkInImportFile = event.currentTarget.files?.[0] || null;
@@ -1313,6 +1423,12 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     });
     root.querySelector("[data-check-in-students-close]")?.addEventListener("click", closeCheckInStudentsModal);
     root.querySelector("[data-check-in-students-print]")?.addEventListener("click", handlePrintSelectedStudentCards);
+    root.querySelector("[data-check-in-today-list-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeTodayCheckInsModal();
+      }
+    });
+    root.querySelector("[data-check-in-today-list-close]")?.addEventListener("click", closeTodayCheckInsModal);
     initializeCheckInStudentsTabulator();
   }
 
@@ -1378,6 +1494,32 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     render();
   }
 
+  async function handleShowTodayCheckIns() {
+    if (!selectedSiteId || !selectedClassId) {
+      checkInSelectionError = "Select a site and class before opening today's check-in list.";
+      render();
+      return;
+    }
+    checkInTodayListOpen = true;
+    checkInTodayListError = "";
+    checkInTodayListDate = formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
+    render();
+    window.setTimeout(() => {
+      void loadTodayCheckIns();
+    }, 0);
+  }
+
+  function closeTodayCheckInsModal() {
+    checkInTodayListOpen = false;
+    checkInTodayListLoading = false;
+    checkInTodayListError = "";
+    render();
+  }
+
+  function todayCheckInQueryKey() {
+    return [selectedSiteId || "", selectedClassId || "", checkInTodayListDate || ""].join(":");
+  }
+
   async function loadCheckInStudents() {
     if (checkInStudentsLoading) {
       return;
@@ -1399,6 +1541,36 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       if (checkInStudentsOpen && !checkInStudentsError) {
         await initializeCheckInStudentsTabulator();
       }
+    }
+  }
+
+  async function loadTodayCheckIns({ force = false } = {}) {
+    if (checkInTodayListLoading || !selectedSiteId || !selectedClassId) {
+      return;
+    }
+    const queryDate = checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
+    checkInTodayListDate = queryDate;
+    const currentQueryKey = [selectedSiteId, selectedClassId, queryDate].join(":");
+    if (!force && checkInTodayListQueryKey === currentQueryKey && checkInTodayListRows.length && !checkInTodayListLoading) {
+      return;
+    }
+    checkInTodayListLoading = true;
+    checkInTodayListError = "";
+    render();
+    try {
+      const response = await listExternalCheckIns({
+        tenantId: school.tenantId,
+        classId: selectedClassId,
+        checkDate: queryDate,
+      });
+      checkInTodayListRows = response.checkIns || [];
+      checkInTodayListCount = checkInTodayListRows.length;
+      checkInTodayListQueryKey = currentQueryKey;
+    } catch (loadError) {
+      checkInTodayListError = loadError instanceof Error ? loadError.message : "Today's check-in list could not be loaded.";
+    } finally {
+      checkInTodayListLoading = false;
+      render();
     }
   }
 
@@ -1436,6 +1608,55 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
           ${checkInStudentsMessage ? `<p class="message success" role="status">${escapeHtml(checkInStudentsMessage)}</p>` : ""}
           <div class="check-in-students-table-shell">
             <div data-check-in-students-tabulator class="check-in-students-tabulator"></div>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function renderCheckInTodayListModal() {
+    const currentSite = selectedSite();
+    const currentClass = selectedClass();
+    return `
+      <div class="modal-backdrop" data-check-in-today-list-modal>
+        <section class="check-in-today-list-panel" role="dialog" aria-modal="true" aria-labelledby="check-in-today-list-title">
+          <div class="workspace-heading workspace-heading-row">
+            <div>
+              <h3 id="check-in-today-list-title">Today's check-in list</h3>
+              <p>${escapeHtml(currentClass ? currentClass.name : "Selected class")}${checkInTodayListDate ? ` - ${checkInTodayListDate}` : ""}</p>
+              <p class="check-in-selection-count">${escapeHtml(currentSite ? `Site: ${currentSite.name}` : "")}</p>
+            </div>
+            <div class="check-in-students-actions">
+              <button class="secondary-button compact-button" data-check-in-today-list-close type="button">Close</button>
+            </div>
+          </div>
+          ${checkInTodayListError ? `<p class="message error" role="alert">${escapeHtml(checkInTodayListError)}</p>` : ""}
+          <p class="check-in-today-count">${escapeHtml(renderTodayCheckInCountText())}</p>
+          <div class="check-in-today-list-shell">
+            ${checkInTodayListLoading ? `<p class="check-in-today-list-empty">Loading check-ins...</p>` : ""}
+            ${!checkInTodayListLoading && !checkInTodayListRows.length ? `<p class="check-in-today-list-empty">No check-ins yet for this class today.</p>` : ""}
+            ${checkInTodayListRows.length ? `
+              <table class="check-in-today-list-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Student</th>
+                    <th>ID</th>
+                    <th>Gender</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${checkInTodayListRows.map((row) => `
+                    <tr>
+                      <td>${escapeHtml(formatCheckInTime(row.checkInTime))}</td>
+                      <td>${escapeHtml(row.studentName || "-")}</td>
+                      <td>${escapeHtml(row.externalStudentId || "-")}</td>
+                      <td>${escapeHtml(row.gender || "-")}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            ` : ""}
           </div>
         </section>
       </div>
@@ -1809,6 +2030,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
 
     checkInScannerStarting = true;
     checkInBarcodeValue = "";
+    checkInLastRawBarcodeValue = "";
     updateCheckInBarcodeValue("");
     updateCheckInStatus("Starting camera...");
 
@@ -1907,14 +2129,16 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       const barcodes = await checkInDetector.detect(video);
       const barcode = barcodes[0] || null;
       const value = barcode?.rawValue || "";
-      if (barcode?.format === "qr_code" && value && value !== checkInBarcodeValue) {
-        playCheckInQrSound();
-      }
-      if (value && value !== checkInBarcodeValue) {
-        checkInBarcodeValue = value;
-        updateCheckInBarcodeValue(value);
-        updateCheckInStatus("Barcode detected.");
-      } else if (!checkInBarcodeValue) {
+      if (value && value !== checkInLastRawBarcodeValue) {
+        checkInLastRawBarcodeValue = value;
+        if (barcode?.format === "qr_code") {
+          await handleExternalStudentQrScan(value);
+        } else {
+          checkInBarcodeValue = value;
+          updateCheckInBarcodeValue(value);
+          updateCheckInStatus("Barcode detected.");
+        }
+      } else if (!checkInLastRawBarcodeValue) {
         updateCheckInStatus("Scanning for barcodes...");
       }
     } catch (scanError) {
@@ -1941,6 +2165,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     checkInScanning = false;
     checkInScannerStarting = false;
     checkInDetector = null;
+    checkInExternalCheckInSubmitting = false;
     if (checkInScannerTimer) {
       clearTimeout(checkInScannerTimer);
       checkInScannerTimer = null;
@@ -1955,7 +2180,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
   }
 
-  function playCheckInQrSound() {
+  function playCheckInSuccessSound() {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) {
       return;
@@ -1993,10 +2218,193 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }, 600);
   }
 
+  function playCheckInFailureSound() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return;
+    }
+
+    if (!checkInAudioContext) {
+      checkInAudioContext = new AudioContextClass();
+    }
+
+    if (checkInAudioContext.state === "suspended") {
+      checkInAudioContext.resume().catch(() => {});
+    }
+
+    const now = checkInAudioContext.currentTime;
+    const gain = checkInAudioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.3, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.14);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+    gain.connect(checkInAudioContext.destination);
+
+    [220, 160].forEach((frequency, index) => {
+      const oscillator = checkInAudioContext.createOscillator();
+      oscillator.type = "square";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.16);
+      oscillator.connect(gain);
+      oscillator.start(now + index * 0.16);
+      oscillator.stop(now + 0.38);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+      };
+    });
+    window.setTimeout(() => {
+      gain.disconnect();
+    }, 520);
+  }
+
+  function speakCheckInSuccess(name) {
+    const speechSynthesis = window.speechSynthesis;
+    const SpeechSynthesisUtteranceClass = window.SpeechSynthesisUtterance;
+    if (!speechSynthesis || !SpeechSynthesisUtteranceClass) {
+      return;
+    }
+
+    try {
+      speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtteranceClass(`${name}. Check in successfully.`);
+      utterance.lang = "en-US";
+      utterance.rate = 0.95;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      speechSynthesis.speak(utterance);
+    } catch (_error) {
+      // Ignore speech synthesis failures; audio feedback still remains.
+    }
+  }
+
   function updateCheckInBarcodeValue(value) {
     const label = root.querySelector("[data-check-in-barcode-value]");
     if (label) {
       label.textContent = value || "Waiting for barcode";
+    }
+  }
+
+  function formatExternalStudentBarcode(payload) {
+    const studentId = String(payload?.studentId || payload?.externalStudentId || "").trim();
+    const studentName = String(payload?.name || payload?.studentName || "").trim();
+    if (studentName && studentId) {
+      return `${studentName} (${studentId})`;
+    }
+    return studentName || studentId || "";
+  }
+
+  function parseExternalStudentBarcode(rawValue) {
+    if (!rawValue) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(rawValue);
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
+      const studentId = String(parsed.studentId || parsed.externalStudentId || "").trim();
+      if (!studentId) {
+        return null;
+      }
+      return {
+        studentId,
+        name: String(parsed.name || parsed.studentName || "").trim(),
+        gender: String(parsed.gender || "").trim(),
+      };
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function formatLocalDateForTimezone(date, timeZone) {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timeZone || undefined,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parts.find((part) => part.type === "year")?.value || String(date.getFullYear());
+    const month = parts.find((part) => part.type === "month")?.value || String(date.getMonth() + 1).padStart(2, "0");
+    const day = parts.find((part) => part.type === "day")?.value || String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function formatCheckInTime(value) {
+    if (!value) {
+      return "-";
+    }
+    try {
+      return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch (_error) {
+      return String(value);
+    }
+  }
+
+  function renderTodayCheckInCountText() {
+    if (!selectedSiteId || !selectedClassId) {
+      return "Select a site and class to see today's check-in count.";
+    }
+    const currentDate = checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
+    const currentQueryKey = [selectedSiteId, selectedClassId, currentDate].join(":");
+    if (checkInTodayListLoading && checkInTodayListQueryKey === currentQueryKey) {
+      return "Loading today's check-in count...";
+    }
+    if (!checkInTodayListQueryKey || checkInTodayListQueryKey !== currentQueryKey) {
+      return "Today's check-in count will load after the class is selected.";
+    }
+    return `${checkInTodayListCount} check-in${checkInTodayListCount === 1 ? "" : "s"} today.`;
+  }
+
+  async function handleExternalStudentQrScan(rawValue) {
+    const payload = parseExternalStudentBarcode(rawValue);
+    if (!payload) {
+      checkInBarcodeValue = rawValue;
+      updateCheckInBarcodeValue(rawValue);
+      updateCheckInStatus("QR code detected.");
+      return;
+    }
+
+    checkInBarcodeValue = formatExternalStudentBarcode(payload);
+    updateCheckInBarcodeValue(checkInBarcodeValue);
+
+    if (!selectedSiteId || !selectedClassId) {
+      updateCheckInStatus("Select a site and class before checking in external students.", true);
+      return;
+    }
+    if (checkInExternalCheckInSubmitting) {
+      return;
+    }
+
+    checkInExternalCheckInSubmitting = true;
+    updateCheckInStatus("Saving external check-in...");
+
+    try {
+      const site = selectedSite();
+      const response = await checkInExternalStudent({
+        tenantId: school.tenantId,
+        externalStudentId: payload.studentId,
+        classId: selectedClassId,
+        checkDate: formatLocalDateForTimezone(new Date(), site?.timezone),
+        studentName: payload.name || null,
+        gender: payload.gender || null,
+        barcodeValue: rawValue,
+      });
+      const confirmation = formatExternalStudentBarcode(payload) || response.externalStudentId;
+      updateCheckInBarcodeValue(confirmation);
+      updateCheckInStatus(`Checked in ${confirmation}.`);
+      playCheckInSuccessSound();
+      speakCheckInSuccess(confirmation);
+      await loadTodayCheckIns({ force: true });
+    } catch (checkInError) {
+      const message = checkInError instanceof Error && checkInError.status === 409
+        ? "This student has already checked in."
+        : checkInError instanceof Error
+          ? checkInError.message
+          : "External check-in could not be saved.";
+      playCheckInFailureSound();
+      updateCheckInStatus(message, true);
+    } finally {
+      checkInExternalCheckInSubmitting = false;
     }
   }
 
@@ -3740,35 +4148,42 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     if (loadingClasses || !school?.tenantId || (role !== "PARENT" && !site)) {
       return;
     }
+    const cacheKey = role === "PARENT"
+      ? `PARENT:${school.tenantId}`
+      : `${school.tenantId}:${site.id}`;
+    const cachedClasses = classListCache.get(cacheKey);
+    if (cachedClasses && Date.now() - cachedClasses.loadedAt < CLASS_LIST_CACHE_TTL_MS) {
+      applyLoadedClasses(cachedClasses.response);
+      if (role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "intro" && selectedSiteId && selectedClassId) {
+        await loadTodayCheckIns();
+      }
+      if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && selectedAttendanceClassId && !attendanceGrid) {
+        await loadAttendanceGrid();
+      }
+      return;
+    }
+    if (cachedClasses) {
+      classListCache.delete(cacheKey);
+    }
     loadingClasses = true;
     try {
       const response = role === "PARENT"
         ? await listAvailableClasses(school.tenantId)
         : await listClasses(school.tenantId, site.id);
-      classes = response.classes || [];
-      if (selectedClassId && !classes.some((classRecord) => classRecord.id === selectedClassId)) {
-        selectedClassId = "";
-        classTeachers = [];
-      }
-      if (selectedStudentClassId && !classes.some((classRecord) => classRecord.id === selectedStudentClassId)) {
-        selectedStudentClassId = "";
-      }
-      if (selectedAttendanceClassId && !classes.some((classRecord) => classRecord.id === selectedAttendanceClassId)) {
-        selectedAttendanceClassId = "";
-        attendanceGrid = null;
-      }
-      if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && !selectedAttendanceClassId && classes.length) {
-        selectedAttendanceClassId = classes[0].id;
-      }
-      classRows = classes.length
-        ? classes.map((classRecord) => `${classRecord.name} - ${programName(classRecord.programId)} - ${classScheduleText(classRecord)}`)
-        : [role === "PARENT" ? "No active classes are available yet." : "No classes have been created for this site yet."];
+      classListCache.set(cacheKey, {
+        loadedAt: Date.now(),
+        response,
+      });
+      applyLoadedClasses(response);
     } catch (loadError) {
       classRows = ["Classes could not be loaded."];
       error = loadError instanceof Error ? loadError.message : "Classes could not be loaded.";
     } finally {
       loadingClasses = false;
       render();
+    }
+    if (role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "intro" && selectedSiteId && selectedClassId) {
+      await loadTodayCheckIns();
     }
     if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && selectedAttendanceClassId && !attendanceGrid) {
       await loadAttendanceGrid();
@@ -3870,7 +4285,40 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   async function loadClassesAfterMutation() {
     loadingClasses = false;
     classRows = null;
+    invalidateClassListCache();
     await loadClasses();
+  }
+
+  function applyLoadedClasses(response) {
+    classes = response.classes || [];
+    if (selectedClassId && !classes.some((classRecord) => classRecord.id === selectedClassId)) {
+      selectedClassId = "";
+      classTeachers = [];
+    }
+    if (!selectedClassId && classes.length) {
+      selectedClassId = classes[0].id;
+    }
+    if (selectedStudentClassId && !classes.some((classRecord) => classRecord.id === selectedStudentClassId)) {
+      selectedStudentClassId = "";
+    }
+    if (selectedAttendanceClassId && !classes.some((classRecord) => classRecord.id === selectedAttendanceClassId)) {
+      selectedAttendanceClassId = "";
+      attendanceGrid = null;
+    }
+    if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && !selectedAttendanceClassId && classes.length) {
+      selectedAttendanceClassId = classes[0].id;
+    }
+    classRows = classes.length
+      ? classes.map((classRecord) => `${classRecord.name} - ${programName(classRecord.programId)} - ${classScheduleText(classRecord)}`)
+      : [role === "PARENT" ? "No active classes are available yet." : "No classes have been created for this site yet."];
+  }
+
+  function invalidateClassListCache(siteId = selectedSiteId) {
+    if (!siteId) {
+      return;
+    }
+    classListCache.delete(`${school.tenantId}:${siteId}`);
+    classListCache.delete(`PARENT:${school.tenantId}`);
   }
 
   async function loadChildren() {

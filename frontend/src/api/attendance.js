@@ -14,6 +14,18 @@ export function checkInAttendance(request) {
   return apiPost("/api/attendance/check-in", request);
 }
 
+export function checkInExternalStudent(request) {
+  return apiPost(`/api/tenants/${encodeURIComponent(request.tenantId)}/external-check-ins`, request);
+}
+
+export function listExternalCheckIns({ tenantId, classId, checkDate }) {
+  const params = new URLSearchParams({
+    classId,
+    checkDate,
+  });
+  return apiGet(`/api/tenants/${encodeURIComponent(tenantId)}/external-check-ins?${params.toString()}`);
+}
+
 export function getClassAttendanceGrid(tenantId, classId) {
   return apiGet(`/api/tenants/${tenantId}/classes/${classId}/attendance-grid`);
 }

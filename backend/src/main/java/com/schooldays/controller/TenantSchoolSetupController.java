@@ -2,8 +2,12 @@ package com.schooldays.controller;
 
 import java.util.Map;
 import java.util.UUID;
+import java.time.LocalDate;
 
 import com.schooldays.dto.api.EndpointStatusResponse;
+import com.schooldays.dto.externalcheckin.ExternalCheckInRequest;
+import com.schooldays.dto.externalcheckin.ExternalCheckInListResponse;
+import com.schooldays.dto.externalcheckin.ExternalCheckInResponse;
 import com.schooldays.dto.externalstudent.ExternalStudentListResponse;
 import com.schooldays.dto.externalstudent.ExternalStudentImportResponse;
 import com.schooldays.dto.auth.InviteUserRequest;
@@ -24,6 +28,7 @@ import com.schooldays.dto.site.SiteResponse;
 import com.schooldays.dto.site.UpdateSiteRequest;
 import com.schooldays.dto.student.StudentRosterResponse;
 import com.schooldays.service.auth.AuthService;
+import com.schooldays.service.externalcheckin.ExternalCheckInService;
 import com.schooldays.service.externalstudent.ExternalStudentImportService;
 import com.schooldays.service.classroom.ClassService;
 import com.schooldays.service.pricing.ClassPricingService;
@@ -55,6 +60,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     private final ClassPricingService classPricingService;
     private final StudentRosterService studentRosterService;
     private final ExternalStudentImportService externalStudentImportService;
+    private final ExternalCheckInService externalCheckInService;
     private final AuthService authService;
 
     public TenantSchoolSetupController(
@@ -64,6 +70,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             ClassPricingService classPricingService,
             StudentRosterService studentRosterService,
             ExternalStudentImportService externalStudentImportService,
+            ExternalCheckInService externalCheckInService,
             AuthService authService
     ) {
         this.siteService = siteService;
@@ -72,6 +79,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
         this.classPricingService = classPricingService;
         this.studentRosterService = studentRosterService;
         this.externalStudentImportService = externalStudentImportService;
+        this.externalCheckInService = externalCheckInService;
         this.authService = authService;
     }
 
@@ -176,6 +184,28 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             return ResponseEntity.ok(externalStudentImportService.listStudents(tenantId));
         }
         return ResponseEntity.ok(externalStudentImportService.listStudents(tenantId, page, pageSize));
+    }
+
+    @PostMapping("/external-check-ins")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<ExternalCheckInResponse> recordExternalCheckIn(
+            @PathVariable("tenantId") UUID tenantId,
+            @Valid @RequestBody ExternalCheckInRequest request,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(
+                externalCheckInService.recordCheckIn(tenantId, userId(authentication), "SCHOOL_ADMIN", request)
+        );
+    }
+
+    @GetMapping("/external-check-ins")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<ExternalCheckInListResponse> listExternalCheckIns(
+            @PathVariable("tenantId") UUID tenantId,
+            @RequestParam("classId") UUID classId,
+            @RequestParam(value = "checkDate", required = false) LocalDate checkDate
+    ) {
+        return ResponseEntity.ok(externalCheckInService.listCheckIns(tenantId, classId, checkDate));
     }
 
     @PostMapping("/classes")

@@ -2135,9 +2135,42 @@ button:disabled {
   align-content: start;
   display: grid;
   gap: 16px;
-  justify-items: start;
-  max-width: 620px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-items: stretch;
+  max-width: 100%;
   padding: 22px;
+}
+
+.check-in-action-group {
+  background: #f8fbff;
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  width: 100%;
+}
+
+.check-in-action-group-compact {
+  gap: 12px;
+}
+
+.check-in-action-group-header {
+  display: grid;
+  gap: 4px;
+}
+
+.check-in-action-group-header h3 {
+  color: #172033;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.check-in-action-group-header p {
+  color: #5f6f86;
+  font-size: 0.92rem;
+  margin: 0;
 }
 
 .check-in-launch-actions {
@@ -2145,6 +2178,43 @@ button:disabled {
   flex-wrap: wrap;
   gap: 10px;
   width: 100%;
+}
+
+.check-in-action-group-compact .check-in-launch-actions {
+  justify-content: flex-start;
+}
+
+.check-in-selector-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  width: 100%;
+}
+
+.check-in-selector-field {
+  display: grid;
+  gap: 8px;
+}
+
+.check-in-selector-field span {
+  color: #344258;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.check-in-selector-field select {
+  min-height: 44px;
+}
+
+.check-in-context-note {
+  margin: 8px 0 0;
+}
+
+.check-in-context-line {
+  color: #5f6f86;
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin: 6px 0 0;
 }
 
 .check-in-import-form {
@@ -2250,6 +2320,58 @@ button:disabled {
   min-width: 0;
 }
 
+.check-in-today-list-panel {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  max-height: min(80vh, 900px);
+  overflow: hidden;
+  padding: 22px;
+  width: min(100%, 920px);
+}
+
+.check-in-today-list-shell {
+  display: grid;
+  gap: 12px;
+  max-height: 100%;
+  overflow: auto;
+}
+
+.check-in-today-list-empty {
+  color: #5f6f86;
+  margin: 0;
+}
+
+.check-in-today-list-table {
+  border-collapse: collapse;
+  min-width: 640px;
+  width: 100%;
+}
+
+.check-in-today-list-table th,
+.check-in-today-list-table td {
+  border-bottom: 1px solid #e6ebf3;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.check-in-today-list-table th {
+  background: #f8fafc;
+  color: #344258;
+  font-size: 0.84rem;
+  font-weight: 900;
+  position: sticky;
+  top: 0;
+}
+
+.check-in-today-list-table td {
+  color: #172033;
+  font-size: 0.92rem;
+}
+
 .spreadsheet-table-wrap {
   overflow: auto;
   border: 1px solid #d8deeb;
@@ -2347,6 +2469,20 @@ button:disabled {
   width: 100%;
   max-width: 240px;
   padding: 22px;
+}
+
+.check-in-result-site {
+  color: #5f6f86;
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin-top: -6px;
+}
+
+.check-in-today-count {
+  color: #344258;
+  font-size: 0.94rem;
+  font-weight: 800;
+  margin: 0;
 }
 
 .check-in-result-panel div {
@@ -2460,6 +2596,10 @@ button:disabled {
   }
 
   .check-in-camera-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .check-in-launch-panel {
     grid-template-columns: 1fr;
   }
 
