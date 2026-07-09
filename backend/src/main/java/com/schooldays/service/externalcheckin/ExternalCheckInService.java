@@ -3,6 +3,8 @@ package com.schooldays.service.externalcheckin;
 import static org.jooq.impl.DSL.field;
 import static org.jooq.impl.DSL.name;
 import static org.jooq.impl.DSL.table;
+import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
+import static com.schooldays.jooq.generated.tables.TeacherAssignments.TEACHER_ASSIGNMENTS;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -73,6 +75,7 @@ public class ExternalCheckInService {
 
         ensureExternalStudentExists(tenantId, request.externalStudentId());
         String className = ensureClassExists(tenantId, request.classId());
+        ensureCheckInPermission(tenantId, request.classId(), checkedInByUserId, checkedInByRole);
         OffsetDateTime now = OffsetDateTime.now();
         JSONB metadata = metadataFor(request);
 
@@ -152,11 +155,18 @@ public class ExternalCheckInService {
         );
     }
 
-    public ExternalCheckInListResponse listCheckIns(UUID tenantId, UUID classId, LocalDate checkDate) {
+    public ExternalCheckInListResponse listCheckIns(
+            UUID tenantId,
+            UUID classId,
+            LocalDate checkDate,
+            UUID checkedInByUserId,
+            String checkedInByRole
+    ) {
         if (checkDate == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "checkDate is required");
         }
         ensureClassExists(tenantId, classId);
+        ensureCheckInPermission(tenantId, classId, checkedInByUserId, checkedInByRole);
 
         var e = table(name("external_check_ins")).as("e");
         var s = table(name("external_students")).as("s");
@@ -234,6 +244,24 @@ public class ExternalCheckInService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found");
         }
         return className;
+    }
+
+    private void ensureCheckInPermission(UUID tenantId, UUID classId, UUID checkedInByUserId, String checkedInByRole) {
+        if ("SCHOOL_ADMIN".equals(checkedInByRole)) {
+            return;
+        }
+        if (!"TEACHER".equals(checkedInByRole)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Check-in is not allowed for this user");
+        }
+        boolean assigned = dsl.fetchExists(dsl.selectOne()
+                .from(TEACHER_ASSIGNMENTS)
+                .join(CLASSES).on(CLASSES.ID.eq(TEACHER_ASSIGNMENTS.CLASS_ID))
+                .where(CLASSES.TENANT_ID.eq(tenantId))
+                .and(CLASSES.ID.eq(classId))
+                .and(TEACHER_ASSIGNMENTS.TEACHER_USER_ID.eq(checkedInByUserId)));
+        if (!assigned) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Teachers can only check in for their assigned classes");
+        }
     }
 
     private JSONB metadataFor(ExternalCheckInRequest request) {

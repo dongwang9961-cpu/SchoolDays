@@ -10,6 +10,10 @@ export function listAvailableClasses(tenantId) {
   return apiGet(`/api/parents/me/classes?${params.toString()}`);
 }
 
+export function listTeacherClasses(tenantId) {
+  return apiGet(`/api/tenants/${encodeURIComponent(tenantId)}/teacher-classes`);
+}
+
 export function createClass(tenantId, request) {
   return apiPost(`/api/tenants/${tenantId}/classes`, request);
 }

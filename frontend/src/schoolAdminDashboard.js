@@ -1,9 +1,9 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
-import { importExternalStudents, inviteUsers, listExternalStudents } from "./api/auth.js";
+import { deleteUser, importExternalStudents, inviteUsers, listExternalStudents } from "./api/auth.js";
 import { checkInAttendance, checkInExternalStudent, getClassAttendanceGrid, listExternalCheckIns, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
-import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, stopClass, updateClass } from "./api/classes.js";
+import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, listTeacherClasses, stopClass, updateClass } from "./api/classes.js";
 import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
 import { getClassPricing, getTenantClassPricing, saveClassPricing } from "./api/pricing.js";
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
@@ -222,6 +222,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   const dashboard = roleDashboards[role] || roleDashboards.PARENT;
   const root = document.querySelector("#root");
   let adminMode = role === "SCHOOL_ADMIN" ? "" : "portal";
+  let teacherMode = role === "TEACHER" ? "choice" : "";
   let activeSectionId = role === "SCHOOL_ADMIN" ? "sites" : "overview";
   let activeOperation = "";
   let notice = "";
@@ -278,6 +279,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let inviteUserClasses = [];
   let inviteUserClassesLoadedForSiteId = "";
   let loadingInviteUserClasses = false;
+  let deleteUserEmail = "";
+  let deleteUserMessage = "";
+  let deleteUserError = "";
+  let deleteUserSubmitting = false;
   let checkInFlowStage = "intro";
   let checkInSelectionError = "";
   let checkInImportFile = null;
@@ -320,6 +325,8 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
   if (role === "SCHOOL_ADMIN") {
     loadSites();
+  } else if (role === "TEACHER") {
+    loadTeacherClasses();
   } else if (role === "PARENT") {
     loadChildren();
     loadClasses();
@@ -339,11 +346,24 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
   function render() {
     scheduleNoticeDismissal();
-    if (!(role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "camera")) {
+    if (!((role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "camera")
+      || (role === "TEACHER" && teacherMode === "checkIn" && checkInFlowStage === "camera"))) {
       stopCheckInScanner();
     }
     if (!checkInStudentsOpen) {
       destroyCheckInStudentsTabulator();
+    }
+    if (role === "TEACHER" && teacherMode === "choice") {
+      renderTeacherChoiceScreen();
+      return;
+    }
+    if (role === "TEACHER" && teacherMode === "checkIn" && checkInFlowStage !== "camera") {
+      renderTeacherCheckInIntro();
+      return;
+    }
+    if (role === "TEACHER" && teacherMode === "checkIn" && checkInFlowStage === "camera") {
+      renderTeacherCheckIn();
+      return;
     }
     if (role === "SCHOOL_ADMIN" && !adminMode) {
       renderSchoolAdminLanding();
@@ -386,7 +406,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
             <h1>${escapeHtml(title)}</h1>
           </div>
 
-          ${role === "SCHOOL_ADMIN" ? adminModeSwitcher() : ""}
+          ${role === "SCHOOL_ADMIN" ? adminModeSwitcher() : role === "TEACHER" ? teacherModeSwitcher() : ""}
 
           <nav class="app-nav" aria-label="${escapeHtml(dashboard.navLabel)}">
             ${sections
@@ -542,6 +562,16 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
           loadPrograms();
           loadClasses();
         }
+      });
+    });
+    root.querySelectorAll("[data-teacher-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        teacherMode = button.dataset.teacherMode;
+        if (teacherMode === "checkIn") {
+          checkInFlowStage = "intro";
+          checkInSelectionError = "";
+        }
+        render();
       });
     });
     root.querySelectorAll("[data-operation-action]").forEach((button) => {
@@ -1100,6 +1130,33 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                   : ""
               }
             </div>
+
+            <div class="invite-delete-user-panel">
+              <div class="workspace-heading">
+                <h3>Delete user</h3>
+                <p>Remove a user from this school by email. Their access is deactivated and school-specific assignments are cleared.</p>
+              </div>
+
+              ${deleteUserError ? `<p class="message error" role="alert">${escapeHtml(deleteUserError)}</p>` : ""}
+              ${deleteUserMessage ? `<p class="message success" role="status">${escapeHtml(deleteUserMessage)}</p>` : ""}
+
+              <form class="invite-delete-user-form" data-delete-user-form>
+                <label class="invite-email-field">
+                  <span>Email address</span>
+                  <input
+                    data-delete-user-email
+                    name="email"
+                    type="email"
+                    value="${escapeHtml(deleteUserEmail)}"
+                    placeholder="Enter the user email"
+                    required
+                  />
+                </label>
+                <div class="operation-actions">
+                  <button class="danger-button" data-delete-user-submit type="submit">${deleteUserSubmitting ? "Deleting..." : "Delete user"}</button>
+                </div>
+              </form>
+            </div>
           </section>
         </section>
       </main>
@@ -1150,6 +1207,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       renderInviteUserHint();
     });
     root.querySelector("[data-invite-user-form]")?.addEventListener("submit", handleInviteUserSubmit);
+    root.querySelector("[data-delete-user-form]")?.addEventListener("submit", handleDeleteUserSubmit);
+    root.querySelector("[data-delete-user-email]")?.addEventListener("input", (event) => {
+      deleteUserEmail = event.currentTarget.value;
+      deleteUserError = "";
+      deleteUserMessage = "";
+    });
     initializeInviteUserPage();
   }
 
@@ -1495,8 +1558,10 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   async function handleShowTodayCheckIns() {
-    if (!selectedSiteId || !selectedClassId) {
-      checkInSelectionError = "Select a site and class before opening today's check-in list.";
+    if (!selectedClassId) {
+      checkInSelectionError = role === "TEACHER"
+        ? "Select a class before opening today's check-in list."
+        : "Select a site and class before opening today's check-in list.";
       render();
       return;
     }
@@ -1517,7 +1582,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   function todayCheckInQueryKey() {
-    return [selectedSiteId || "", selectedClassId || "", checkInTodayListDate || ""].join(":");
+    return [selectedClassId || "", checkInTodayListDate || ""].join(":");
   }
 
   async function loadCheckInStudents() {
@@ -1545,12 +1610,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   async function loadTodayCheckIns({ force = false } = {}) {
-    if (checkInTodayListLoading || !selectedSiteId || !selectedClassId) {
+    if (checkInTodayListLoading || !selectedClassId) {
       return;
     }
     const queryDate = checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
     checkInTodayListDate = queryDate;
-    const currentQueryKey = [selectedSiteId, selectedClassId, queryDate].join(":");
+    const currentQueryKey = [selectedClassId, queryDate].join(":");
     if (!force && checkInTodayListQueryKey === currentQueryKey && checkInTodayListRows.length && !checkInTodayListLoading) {
       return;
     }
@@ -2010,6 +2075,42 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     }
   }
 
+  async function handleDeleteUserSubmit(event) {
+    event.preventDefault();
+
+    const email = String(deleteUserEmail || "").trim();
+    deleteUserError = "";
+    deleteUserMessage = "";
+
+    if (!email) {
+      deleteUserError = "Enter an email address.";
+      render();
+      return;
+    }
+
+    if (!window.confirm(`Delete ${email} from this school?`)) {
+      return;
+    }
+
+    deleteUserSubmitting = true;
+    render();
+
+    try {
+      const response = await deleteUser({
+        tenantId: school.tenantId,
+        email,
+      });
+      deleteUserMessage = response?.message || `${email} was removed.`;
+      deleteUserEmail = "";
+    } catch (deleteError) {
+      deleteUserMessage = "";
+      deleteUserError = deleteError instanceof Error ? deleteError.message : "User could not be deleted.";
+    } finally {
+      deleteUserSubmitting = false;
+      render();
+    }
+  }
+
   async function startCheckInScanner() {
     if (checkInCameraStream) {
       attachCheckInCameraStream();
@@ -2341,11 +2442,13 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   function renderTodayCheckInCountText() {
-    if (!selectedSiteId || !selectedClassId) {
-      return "Select a site and class to see today's check-in count.";
+    if (!selectedClassId) {
+      return role === "TEACHER"
+        ? "Select a class to see today's check-in count."
+        : "Select a site and class to see today's check-in count.";
     }
     const currentDate = checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
-    const currentQueryKey = [selectedSiteId, selectedClassId, currentDate].join(":");
+    const currentQueryKey = [selectedClassId, currentDate].join(":");
     if (checkInTodayListLoading && checkInTodayListQueryKey === currentQueryKey) {
       return "Loading today's check-in count...";
     }
@@ -2367,8 +2470,10 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     checkInBarcodeValue = formatExternalStudentBarcode(payload);
     updateCheckInBarcodeValue(checkInBarcodeValue);
 
-    if (!selectedSiteId || !selectedClassId) {
-      updateCheckInStatus("Select a site and class before checking in external students.", true);
+    if (!selectedClassId) {
+      updateCheckInStatus(role === "TEACHER"
+        ? "Select a class before checking in external students."
+        : "Select a site and class before checking in external students.", true);
       return;
     }
     if (checkInExternalCheckInSubmitting) {
@@ -2643,6 +2748,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         return ["Loading family overview..."];
       }
       return children.length ? [] : ["No child records loaded yet."];
+    }
+    if (section.id === "overview" && role === "TEACHER") {
+      if (loadingClasses && classRows === null) {
+        return ["Loading teacher classes..."];
+      }
+      return classRows || ["No assigned classes loaded yet."];
     }
     if (section.id === "sites") {
       if (loadingSites && siteRows === null) {
@@ -4145,12 +4256,14 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
   async function loadClasses() {
     const site = selectedSite();
-    if (loadingClasses || !school?.tenantId || (role !== "PARENT" && !site)) {
+    if (loadingClasses || !school?.tenantId || (role !== "PARENT" && role !== "TEACHER" && !site)) {
       return;
     }
     const cacheKey = role === "PARENT"
       ? `PARENT:${school.tenantId}`
-      : `${school.tenantId}:${site.id}`;
+      : role === "TEACHER"
+        ? `TEACHER:${school.tenantId}`
+        : `${school.tenantId}:${site.id}`;
     const cachedClasses = classListCache.get(cacheKey);
     if (cachedClasses && Date.now() - cachedClasses.loadedAt < CLASS_LIST_CACHE_TTL_MS) {
       applyLoadedClasses(cachedClasses.response);
@@ -4169,7 +4282,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     try {
       const response = role === "PARENT"
         ? await listAvailableClasses(school.tenantId)
-        : await listClasses(school.tenantId, site.id);
+        : role === "TEACHER"
+          ? await listTeacherClasses(school.tenantId)
+          : await listClasses(school.tenantId, site.id);
       classListCache.set(cacheKey, {
         loadedAt: Date.now(),
         response,
@@ -4311,6 +4426,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     classRows = classes.length
       ? classes.map((classRecord) => `${classRecord.name} - ${programName(classRecord.programId)} - ${classScheduleText(classRecord)}`)
       : [role === "PARENT" ? "No active classes are available yet." : "No classes have been created for this site yet."];
+    if (role === "TEACHER" && !classes.length) {
+      classRows = ["No assigned classes loaded yet."];
+    }
   }
 
   function invalidateClassListCache(siteId = selectedSiteId) {
@@ -4319,6 +4437,14 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     }
     classListCache.delete(`${school.tenantId}:${siteId}`);
     classListCache.delete(`PARENT:${school.tenantId}`);
+    classListCache.delete(`TEACHER:${school.tenantId}`);
+  }
+
+  async function loadTeacherClasses() {
+    if (loadingClasses || !school?.tenantId || role !== "TEACHER") {
+      return;
+    }
+    await loadClasses();
   }
 
   async function loadChildren() {
@@ -4737,6 +4863,191 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       </div>
     `;
   }
+
+  function teacherModeSwitcher() {
+    return `
+      <div class="app-mode-switcher">
+        <button class="${teacherMode === "choice" ? "is-active" : ""}" data-teacher-mode="choice" type="button">Choice screen</button>
+        <button class="${teacherMode === "main" ? "is-active" : ""}" data-teacher-mode="main" type="button">Main UI</button>
+        <button class="${teacherMode === "checkIn" ? "is-active" : ""}" data-teacher-mode="checkIn" type="button">Check in</button>
+      </div>
+    `;
+  }
+
+  function renderTeacherChoiceScreen() {
+    root.innerHTML = `
+      <main class="admin-choice-page">
+        <section class="admin-choice-shell">
+          <header class="app-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(school.name)}</p>
+              <h2>Teacher portal</h2>
+              <p>Choose the main classroom workspace or go straight to check-in.</p>
+            </div>
+            <div class="header-actions">
+              <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+            </div>
+          </header>
+
+          <section class="workspace-panel">
+            <div class="workspace-heading">
+              <h3>Main UI</h3>
+              <p>Open your class dashboard, schedules, attendance, and notifications.</p>
+            </div>
+            <div class="operation-actions">
+              <button data-teacher-enter-main type="button">Open main UI</button>
+            </div>
+          </section>
+
+          <section class="workspace-panel">
+            <div class="workspace-heading">
+              <h3>Check in</h3>
+              <p>Choose a class and launch the camera check-in flow.</p>
+            </div>
+            <div class="operation-actions">
+              <button data-teacher-enter-check-in type="button">Open check-in</button>
+            </div>
+          </section>
+        </section>
+      </main>
+    `;
+
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    root.querySelector("[data-teacher-enter-main]")?.addEventListener("click", () => {
+      teacherMode = "main";
+      activeSectionId = "overview";
+      render();
+    });
+    root.querySelector("[data-teacher-enter-check-in]")?.addEventListener("click", () => {
+      teacherMode = "checkIn";
+      checkInFlowStage = "intro";
+      checkInSelectionError = "";
+      render();
+    });
+  }
+
+  function renderTeacherCheckInIntro() {
+    const selectedClassRecord = selectedClass();
+    root.innerHTML = `
+      <main class="admin-choice-page check-in-intro-page">
+        <section class="admin-choice-shell" aria-labelledby="teacher-check-in-title">
+          <header class="app-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(school.name)}</p>
+              <h2 id="teacher-check-in-title">Teacher check-in</h2>
+              <p class="context-note check-in-context-note">
+                ${escapeHtml(selectedClassRecord ? `Current class: ${selectedClassRecord.name}.` : "Select a class before starting the camera check-in flow.")}
+              </p>
+            </div>
+            <div class="header-actions">
+              <button class="secondary-button compact-button" data-teacher-back-choice type="button">Back</button>
+              <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+            </div>
+          </header>
+
+          <section class="standalone-panel check-in-launch-panel">
+            <div class="check-in-action-group">
+              <div class="check-in-action-group-header">
+                <h3>Camera check-in</h3>
+                <p>Pick one of your classes, then start the camera.</p>
+              </div>
+              <div class="check-in-selector-grid">
+                <label class="check-in-selector-field">
+                  <span>Class</span>
+                  <select data-teacher-check-in-class-select ${loadingClasses ? "disabled" : ""}>
+                    <option value="">Select class</option>
+                    ${classes.map((classRecord) => `<option value="${escapeHtml(classRecord.id)}"${classRecord.id === selectedClassId ? " selected" : ""}>${escapeHtml(classRecord.name)}</option>`).join("")}
+                  </select>
+                </label>
+              </div>
+              ${checkInSelectionError ? `<p class="message error" role="alert">${escapeHtml(checkInSelectionError)}</p>` : ""}
+              <p class="check-in-today-count">${escapeHtml(renderTodayCheckInCountText())}</p>
+              <div class="check-in-launch-actions">
+                <button class="check-in-launch-button" data-teacher-check-in-start type="button" ${!selectedClassId ? "disabled" : ""}>Check In</button>
+                <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedClassId ? "disabled" : ""}>Today's check-in list</button>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+      ${checkInTodayListOpen ? renderCheckInTodayListModal() : ""}
+    `;
+
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    root.querySelector("[data-teacher-back-choice]")?.addEventListener("click", () => {
+      teacherMode = "choice";
+      checkInFlowStage = "intro";
+      checkInSelectionError = "";
+      render();
+    });
+    root.querySelector("[data-teacher-check-in-class-select]")?.addEventListener("change", (event) => {
+      selectedClassId = event.currentTarget.value;
+      checkInSelectionError = "";
+      checkInTodayListRows = [];
+      checkInTodayListCount = 0;
+      checkInTodayListQueryKey = "";
+      checkInTodayListDate = "";
+      render();
+      if (selectedClassId) {
+        loadTodayCheckIns();
+      }
+    });
+    root.querySelector("[data-teacher-check-in-start]")?.addEventListener("click", () => {
+      if (!selectedClassId) {
+        checkInSelectionError = "Select a class before starting check-in.";
+        render();
+        return;
+      }
+      checkInFlowStage = "camera";
+      render();
+    });
+    root.querySelector("[data-check-in-today-list]")?.addEventListener("click", handleShowTodayCheckIns);
+  }
+
+  function renderTeacherCheckIn() {
+    const currentClass = selectedClass();
+    root.innerHTML = `
+      <main class="admin-check-in-page">
+        <section class="admin-check-in-shell" aria-labelledby="teacher-check-in-camera-title">
+          <header class="admin-check-in-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(school.name)}</p>
+              <h2 id="teacher-check-in-camera-title">Check in</h2>
+              <p class="check-in-context-line">
+                ${escapeHtml(currentClass ? currentClass.name : "Choose a class")}
+              </p>
+            </div>
+            <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+          </header>
+
+          <section class="check-in-camera-panel">
+            <aside class="check-in-result-panel" aria-live="polite">
+              <div>
+                <span class="check-in-result-label">Barcode value</span>
+                <strong data-check-in-barcode-value>${escapeHtml(checkInBarcodeValue || "Waiting for barcode")}</strong>
+              </div>
+              <p class="check-in-result-site">${escapeHtml(currentClass ? `Class: ${currentClass.name}` : "No class selected")}</p>
+              <div class="check-in-status-block">
+                <span class="check-in-result-label">Barcode status</span>
+                <p class="check-in-status" data-check-in-status>${escapeHtml(checkInScannerStatus)}</p>
+              </div>
+              <div class="check-in-status-block">
+                <span class="check-in-result-label">Today's check-ins</span>
+                <p class="check-in-status">${escapeHtml(renderTodayCheckInCountText())}</p>
+              </div>
+            </aside>
+            <div class="check-in-video-frame">
+              <video autoplay muted playsinline data-check-in-video></video>
+              <div class="check-in-target" aria-hidden="true"></div>
+            </div>
+          </section>
+        </section>
+      </main>
+    `;
+
+    root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    startCheckInScanner();
+  }
 }
 
 export function bestSchoolRole(user, tenantId) {
@@ -4963,7 +5274,7 @@ function toolbarFor(section) {
 }
 
 function panelHeaderAction(section, role) {
-  if (role === "PARENT") {
+  if (role !== "SCHOOL_ADMIN") {
     return "";
   }
   const addActions = {

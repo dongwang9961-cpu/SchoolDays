@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPostForm } from "./client.js";
+import { apiDelete, apiGet, apiPost, apiPostForm } from "./client.js";
 
 export function login({ email, password }) {
   return apiPost("/api/auth/login", { email, password }, { auth: false });
@@ -18,6 +18,11 @@ export function inviteUsers({ tenantId, role, emails, classId }) {
     emails,
     classId,
   });
+}
+
+export function deleteUser({ tenantId, email }) {
+  const params = new URLSearchParams({ email });
+  return apiDelete(`/api/tenants/${encodeURIComponent(tenantId)}/users?${params.toString()}`);
 }
 
 export function importExternalStudents({ tenantId, file }) {

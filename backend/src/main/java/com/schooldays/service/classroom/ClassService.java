@@ -1,6 +1,8 @@
 package com.schooldays.service.classroom;
 
 import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
+import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
+import static com.schooldays.jooq.generated.tables.TeacherAssignments.TEACHER_ASSIGNMENTS;
 import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 import static com.schooldays.jooq.generated.tables.Tenants.TENANTS;
 
@@ -52,6 +54,26 @@ public class ClassService {
     public ClassListResponse listAvailableClasses(UUID tenantId) {
         requireTenant(tenantId);
         List<ClassResponse> classes = classDao.findActiveByTenant(tenantId)
+                .stream()
+                .map(ClassResponse::from)
+                .toList();
+        return new ClassListResponse(classes);
+    }
+
+    public ClassListResponse listTeacherClasses(UUID tenantId, UUID teacherUserId) {
+        requireTenant(tenantId);
+        List<ClassResponse> classes = dsl.select(CLASSES.fields())
+                .from(CLASSES)
+                .join(TEACHER_ASSIGNMENTS).on(TEACHER_ASSIGNMENTS.CLASS_ID.eq(CLASSES.ID))
+                .join(PROGRAMS).on(PROGRAMS.ID.eq(CLASSES.PROGRAM_ID))
+                .join(SCHOOL_SITES).on(SCHOOL_SITES.ID.eq(PROGRAMS.SITE_ID))
+                .where(CLASSES.TENANT_ID.eq(tenantId))
+                .and(TEACHER_ASSIGNMENTS.TEACHER_USER_ID.eq(teacherUserId))
+                .and(CLASSES.STATUS.eq("active"))
+                .and(PROGRAMS.STATUS.eq("active"))
+                .and(SCHOOL_SITES.STATUS.eq("active"))
+                .orderBy(PROGRAMS.SITE_ID.asc(), CLASSES.START_DATE.asc(), CLASSES.SEQ_ID.asc())
+                .fetchInto(CLASSES)
                 .stream()
                 .map(ClassResponse::from)
                 .toList();

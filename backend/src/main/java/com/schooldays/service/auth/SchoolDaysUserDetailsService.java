@@ -29,6 +29,9 @@ public class SchoolDaysUserDetailsService implements UserDetailsService {
     public UserDetails loadUserByUsername(String username) {
         var user = userDao.findAuthUserByEmail(EmailNormalizer.normalize(username))
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        if (!isActive(user)) {
+            throw new UsernameNotFoundException("User is inactive");
+        }
 
         String passwordHash = user.passwordHash();
         if (passwordHash == null || passwordHash.isBlank()) {
@@ -41,8 +44,15 @@ public class SchoolDaysUserDetailsService implements UserDetailsService {
     public AuthenticatedUser loadById(UUID userId) {
         var user = userDao.findAuthUserById(userId)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        if (!isActive(user)) {
+            throw new UsernameNotFoundException("User is inactive");
+        }
 
         return toAuthenticatedUser(user);
+    }
+
+    private boolean isActive(UserAuthRow user) {
+        return user != null && "active".equalsIgnoreCase(user.status());
     }
 
     private AuthenticatedUser toAuthenticatedUser(UserAuthRow user) {

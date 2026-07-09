@@ -35,12 +35,14 @@ import com.schooldays.service.pricing.ClassPricingService;
 import com.schooldays.service.program.ProgramService;
 import com.schooldays.service.site.SiteService;
 import com.schooldays.service.student.StudentRosterService;
+import com.schooldays.security.TenantSecurity;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -62,6 +64,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     private final ExternalStudentImportService externalStudentImportService;
     private final ExternalCheckInService externalCheckInService;
     private final AuthService authService;
+    private final TenantSecurity tenantSecurity;
 
     public TenantSchoolSetupController(
             SiteService siteService,
@@ -71,7 +74,8 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             StudentRosterService studentRosterService,
             ExternalStudentImportService externalStudentImportService,
             ExternalCheckInService externalCheckInService,
-            AuthService authService
+            AuthService authService,
+            TenantSecurity tenantSecurity
     ) {
         this.siteService = siteService;
         this.programService = programService;
@@ -81,6 +85,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
         this.externalStudentImportService = externalStudentImportService;
         this.externalCheckInService = externalCheckInService;
         this.authService = authService;
+        this.tenantSecurity = tenantSecurity;
     }
 
     @GetMapping("/sites")
@@ -145,6 +150,15 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
         return ResponseEntity.ok(classService.listClasses(tenantId, siteId));
     }
 
+    @GetMapping("/teacher-classes")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'TEACHER')")
+    public ResponseEntity<ClassListResponse> listTeacherClasses(
+            @PathVariable("tenantId") UUID tenantId,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(classService.listTeacherClasses(tenantId, userId(authentication)));
+    }
+
     @GetMapping("/students")
     @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
     public ResponseEntity<StudentRosterResponse> listStudents(
@@ -162,6 +176,16 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             Authentication authentication
     ) {
         return ResponseEntity.ok(authService.inviteUsers(tenantId, userId(authentication), request));
+    }
+
+    @DeleteMapping("/users")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<EndpointStatusResponse> deleteUser(
+            @PathVariable("tenantId") UUID tenantId,
+            @RequestParam("email") String email,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(authService.deleteUser(tenantId, userId(authentication), email));
     }
 
     @PostMapping(value = "/external-students/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -187,25 +211,32 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/external-check-ins")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
     public ResponseEntity<ExternalCheckInResponse> recordExternalCheckIn(
             @PathVariable("tenantId") UUID tenantId,
             @Valid @RequestBody ExternalCheckInRequest request,
             Authentication authentication
     ) {
+        String checkedInByRole = tenantSecurity.hasTenantRole(authentication, tenantId, "SCHOOL_ADMIN")
+                ? "SCHOOL_ADMIN"
+                : "TEACHER";
         return ResponseEntity.ok(
-                externalCheckInService.recordCheckIn(tenantId, userId(authentication), "SCHOOL_ADMIN", request)
+                externalCheckInService.recordCheckIn(tenantId, userId(authentication), checkedInByRole, request)
         );
     }
 
     @GetMapping("/external-check-ins")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
     public ResponseEntity<ExternalCheckInListResponse> listExternalCheckIns(
             @PathVariable("tenantId") UUID tenantId,
             @RequestParam("classId") UUID classId,
-            @RequestParam(value = "checkDate", required = false) LocalDate checkDate
+            @RequestParam(value = "checkDate", required = false) LocalDate checkDate,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(externalCheckInService.listCheckIns(tenantId, classId, checkDate));
+        String checkedInByRole = tenantSecurity.hasTenantRole(authentication, tenantId, "SCHOOL_ADMIN")
+                ? "SCHOOL_ADMIN"
+                : "TEACHER";
+        return ResponseEntity.ok(externalCheckInService.listCheckIns(tenantId, classId, checkDate, userId(authentication), checkedInByRole));
     }
 
     @PostMapping("/classes")

@@ -43,6 +43,23 @@ export async function apiPost(path, body, options = {}) {
   return response.json();
 }
 
+export async function apiDelete(path, options = {}) {
+  const response = await fetch(apiUrl(path), {
+    method: "DELETE",
+    headers: jsonHeaders(options),
+  });
+
+  if (!response.ok) {
+    await handleFailedResponse(response, options);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
+}
+
 export async function apiPostForm(path, formData, options = {}) {
   const headers = {};
   const accessToken = localStorage.getItem("schooldays.accessToken");

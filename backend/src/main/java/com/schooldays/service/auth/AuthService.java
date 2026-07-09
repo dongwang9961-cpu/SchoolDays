@@ -2,6 +2,11 @@ package com.schooldays.service.auth;
 
 import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
 import static com.schooldays.jooq.generated.tables.TeacherAssignments.TEACHER_ASSIGNMENTS;
+import static com.schooldays.jooq.generated.tables.TeacherInvitations.TEACHER_INVITATIONS;
+import static com.schooldays.jooq.generated.tables.TenantInvitations.TENANT_INVITATIONS;
+import static com.schooldays.jooq.generated.tables.UserRegistrationLinks.USER_REGISTRATION_LINKS;
+import static com.schooldays.jooq.generated.tables.UserRoles.USER_ROLES;
+import static com.schooldays.jooq.generated.tables.Users.USERS;
 
 import java.net.URLEncoder;
 import java.net.URI;
@@ -42,6 +47,7 @@ import com.schooldays.entities.auth.GoogleOAuthState;
 import com.schooldays.entities.auth.RegistrationLinkRow;
 import com.schooldays.entities.auth.TeacherInvitationRow;
 import com.schooldays.entities.auth.TenantInvitationRow;
+import com.schooldays.entities.auth.UserAuthRow;
 import com.schooldays.service.email.SystemEmailMessage;
 import com.schooldays.service.email.SystemEmailService;
 import org.jooq.DSLContext;
@@ -59,6 +65,8 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class AuthService {
@@ -67,6 +75,7 @@ public class AuthService {
     private static final long REGISTRATION_LINK_TTL_HOURS = 48;
     private static final String GOOGLE_PENDING_PHONE = "__google_profile_pending__";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final Logger LOGGER = LoggerFactory.getLogger(AuthService.class);
 
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
@@ -349,6 +358,51 @@ public class AuthService {
         return new InviteUserResponse("success", results);
     }
 
+    @Transactional
+    public EndpointStatusResponse deleteUser(UUID tenantId, UUID deletedByUserId, String rawEmail) {
+        String email = EmailNormalizer.normalize(rawEmail);
+        UserAuthRow user = userDao.findAuthUserByEmail(email)
+                .orElseThrow(() -> new InvalidAuthRequestException("User was not found"));
+
+        UUID userId = user.id();
+        dsl.deleteFrom(TEACHER_ASSIGNMENTS)
+                .where(TEACHER_ASSIGNMENTS.TEACHER_USER_ID.eq(userId))
+                .and(TEACHER_ASSIGNMENTS.CLASS_ID.in(
+                        dsl.select(CLASSES.ID)
+                                .from(CLASSES)
+                                .where(CLASSES.TENANT_ID.eq(tenantId))
+                ))
+                .execute();
+        dsl.deleteFrom(USER_ROLES)
+                .where(USER_ROLES.USER_ID.eq(userId))
+                .and(USER_ROLES.TENANT_ID.eq(tenantId))
+                .execute();
+        dsl.deleteFrom(TEACHER_INVITATIONS)
+                .where(TEACHER_INVITATIONS.TENANT_ID.eq(tenantId))
+                .and(TEACHER_INVITATIONS.TEACHER_USER_ID.eq(userId)
+                        .or(TEACHER_INVITATIONS.INVITED_BY_USER_ID.eq(userId)))
+                .execute();
+        dsl.deleteFrom(TENANT_INVITATIONS)
+                .where(TENANT_INVITATIONS.TENANT_ID.eq(tenantId))
+                .and(TENANT_INVITATIONS.INVITED_BY_USER_ID.eq(userId))
+                .execute();
+        dsl.deleteFrom(USER_REGISTRATION_LINKS)
+                .where(USER_REGISTRATION_LINKS.TENANT_ID.eq(tenantId))
+                .and(USER_REGISTRATION_LINKS.EMAIL.eq(email))
+                .execute();
+
+        if (roleDao.findTenantRoles(userId).isEmpty()) {
+            archiveDeletedUser(tenantId, deletedByUserId, userId, email);
+            deleteUserOwnedData(userId, email);
+            dsl.deleteFrom(USERS)
+                    .where(USERS.ID.eq(userId))
+                    .execute();
+            return new EndpointStatusResponse("success", "DELETE /api/tenants/{tenantId}/users", "User archived and removed from the system.");
+        }
+
+        return new EndpointStatusResponse("success", "DELETE /api/tenants/{tenantId}/users", "User removed from this school.");
+    }
+
     public AuthResponse login(LoginRequest request) {
         var authentication = authenticationManager.authenticate(
                 UsernamePasswordAuthenticationToken.unauthenticated(
@@ -482,7 +536,11 @@ public class AuthService {
         if (userId != null) {
             roleDao.assignRole(userId, tenantId, "TEACHER");
             assignTeacherToClass(tenantId, classId, userId, invitedByUserId);
-            sendTeacherGrantedEmail(school, tenantId, email, classId, false);
+            try {
+                sendTeacherGrantedEmail(school, tenantId, email, classId, false);
+            } catch (RuntimeException exception) {
+                LOGGER.warn("Teacher invitation email could not be sent for {} in tenant {}", email, tenantId, exception);
+            }
             return new InviteUserResultResponse(
                     email,
                     "TEACHER",
@@ -545,6 +603,40 @@ public class AuthService {
                 "invited",
                 "Invitation email sent with a registration link."
         );
+    }
+
+    private void archiveDeletedUser(UUID tenantId, UUID deletedByUserId, UUID userId, String email) {
+        dsl.execute(
+                "insert into user_history (" +
+                        "original_user_id, deleted_from_tenant_id, deleted_by_user_id, email, phone, password_hash, first_name, last_name, status, metadata, deleted_reason, deleted_at, created_at, updated_at" +
+                        ") select id, ?, ?, email, phone, password_hash, first_name, last_name, 'deleted', metadata, ?, now(), created_at, updated_at from users where id = ?",
+                tenantId,
+                deletedByUserId,
+                "deleted from school management",
+                userId
+        );
+    }
+
+    private void deleteUserOwnedData(UUID userId, String email) {
+        dsl.execute("delete from user_registration_links where email = ?", email);
+        dsl.execute("delete from teacher_invitations where invited_by_user_id = ? or teacher_user_id = ? or email = ?", userId, userId, email);
+        dsl.execute("delete from tenant_invitations where invited_by_user_id = ? or admin_email = ?", userId, email);
+        dsl.execute("delete from teacher_assignments where teacher_user_id = ? or assigned_by_user_id = ?", userId, userId);
+        dsl.execute("delete from user_roles where user_id = ?", userId);
+        dsl.execute("delete from external_check_ins where checked_in_by_user_id = ?", userId);
+        dsl.execute("delete from email_notification_history where sender_user_id = ?", userId);
+        dsl.execute("delete from notification_providers where created_by_user_id = ?", userId);
+        dsl.execute("delete from payment_receipts where uploaded_by_user_id = ? or reviewed_by_user_id = ?", userId, userId);
+        dsl.execute("delete from payment_transactions where payer_user_id = ? or recorded_by_user_id = ?", userId, userId);
+        dsl.execute("delete from attendance where checked_in_by_user_id = ?", userId);
+        dsl.execute("delete from enrollment_perks where enrollment_id in (select e.id from enrollments e join children c on c.id = e.child_id where c.parent_user_id = ?)", userId);
+        dsl.execute("delete from enrollment_dates where enrollment_id in (select e.id from enrollments e join children c on c.id = e.child_id where c.parent_user_id = ?)", userId);
+        dsl.execute("delete from payment_receipts where enrollment_id in (select e.id from enrollments e join children c on c.id = e.child_id where c.parent_user_id = ?)", userId);
+        dsl.execute("delete from payment_transactions where enrollment_id in (select e.id from enrollments e join children c on c.id = e.child_id where c.parent_user_id = ?)", userId);
+        dsl.execute("delete from attendance where child_id in (select id from children where parent_user_id = ?)", userId);
+        dsl.execute("delete from enrollments where child_id in (select id from children where parent_user_id = ?) or created_by_user_id = ?", userId, userId);
+        dsl.execute("delete from children where parent_user_id = ?", userId);
+        dsl.execute("delete from user_identities where user_id = ?", userId);
     }
 
     private void sendRegistrationLinkEmail(RegistrationLinkRow link, RegistrationLinkResponse response, String completionLink) {
