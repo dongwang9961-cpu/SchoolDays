@@ -363,6 +363,9 @@ public class AuthService {
         String email = EmailNormalizer.normalize(rawEmail);
         UserAuthRow user = userDao.findAuthUserByEmail(email)
                 .orElseThrow(() -> new InvalidAuthRequestException("User was not found"));
+        if (user.id().equals(deletedByUserId)) {
+            throw new InvalidAuthRequestException("School administrators cannot delete themselves");
+        }
 
         UUID userId = user.id();
         dsl.deleteFrom(TEACHER_ASSIGNMENTS)

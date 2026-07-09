@@ -221,6 +221,7 @@ const roleDashboards = {
 export function renderSchoolDashboard({ role, school, user, onLogout }) {
   const dashboard = roleDashboards[role] || roleDashboards.PARENT;
   const root = document.querySelector("#root");
+  const currentUserEmail = String(user?.email || "").trim().toLowerCase();
   let adminMode = role === "SCHOOL_ADMIN" ? "" : "portal";
   let teacherMode = role === "TEACHER" ? "choice" : "";
   let activeSectionId = role === "SCHOOL_ADMIN" ? "sites" : "overview";
@@ -1196,7 +1197,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                   />
                 </label>
                 <div class="operation-actions">
-                  <button class="danger-button" data-delete-user-submit type="submit">${deleteUserSubmitting ? "Deleting..." : "Delete user"}</button>
+                <button class="danger-button" data-delete-user-submit type="submit" ${currentUserEmail && deleteUserEmail.trim().toLowerCase() === currentUserEmail ? "disabled" : ""}>${deleteUserSubmitting ? "Deleting..." : "Delete user"}</button>
                 </div>
               </form>
             </div>
@@ -2146,6 +2147,11 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
     if (!email) {
       deleteUserError = "Enter an email address.";
+      render();
+      return;
+    }
+    if (currentUserEmail && email.toLowerCase() === currentUserEmail) {
+      deleteUserError = "You cannot delete your own account.";
       render();
       return;
     }
