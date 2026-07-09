@@ -1,10 +1,12 @@
 package com.schooldays.controller;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.time.LocalDate;
 
 import com.schooldays.dto.api.EndpointStatusResponse;
+import com.schooldays.dto.externalcheckin.ExternalCheckInDateCountResponse;
 import com.schooldays.dto.externalcheckin.ExternalCheckInRequest;
 import com.schooldays.dto.externalcheckin.ExternalCheckInListResponse;
 import com.schooldays.dto.externalcheckin.ExternalCheckInResponse;
@@ -237,6 +239,23 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
                 ? "SCHOOL_ADMIN"
                 : "TEACHER";
         return ResponseEntity.ok(externalCheckInService.listCheckIns(tenantId, classId, checkDate, userId(authentication), checkedInByRole));
+    }
+
+    @GetMapping("/external-check-ins/counts")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
+    public ResponseEntity<List<ExternalCheckInDateCountResponse>> listExternalCheckInCounts(
+            @PathVariable("tenantId") UUID tenantId,
+            @RequestParam("classId") UUID classId,
+            @RequestParam("startDate") LocalDate startDate,
+            @RequestParam("endDate") LocalDate endDate,
+            Authentication authentication
+    ) {
+        String checkedInByRole = tenantSecurity.hasTenantRole(authentication, tenantId, "SCHOOL_ADMIN")
+                ? "SCHOOL_ADMIN"
+                : "TEACHER";
+        return ResponseEntity.ok(
+                externalCheckInService.listCheckInCounts(tenantId, classId, startDate, endDate, userId(authentication), checkedInByRole)
+        );
     }
 
     @PostMapping("/classes")

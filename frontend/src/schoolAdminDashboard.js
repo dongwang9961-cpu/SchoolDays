@@ -1,7 +1,7 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
 import { deleteUser, importExternalStudents, inviteUsers, listExternalStudents } from "./api/auth.js";
-import { checkInAttendance, checkInExternalStudent, getClassAttendanceGrid, listExternalCheckIns, listParentAttendance } from "./api/attendance.js";
+import { checkInAttendance, checkInExternalStudent, getClassAttendanceGrid, listExternalCheckIns, listExternalCheckInCounts, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, listTeacherClasses, stopClass, updateClass } from "./api/classes.js";
 import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
@@ -283,6 +283,18 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let deleteUserMessage = "";
   let deleteUserError = "";
   let deleteUserSubmitting = false;
+  let externalAttendanceStage = "";
+  let externalAttendanceDate = "";
+  let externalAttendanceDetailRows = [];
+  let externalAttendanceDetailLoading = false;
+  let externalAttendanceDetailError = "";
+  let externalAttendanceDetailQueryKey = "";
+  let externalAttendanceDetailOpen = false;
+  let externalAttendanceDetailTabulator = null;
+  let externalAttendanceCountRows = [];
+  let externalAttendanceCountLoading = false;
+  let externalAttendanceCountError = "";
+  let externalAttendanceCountQueryKey = "";
   let checkInFlowStage = "intro";
   let checkInSelectionError = "";
   let checkInImportFile = null;
@@ -310,6 +322,21 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let checkInReminderOpen = false;
   let checkInReminderDismissed = false;
   let noticeTimer = null;
+
+  function resetExternalAttendanceState() {
+    externalAttendanceStage = "intro";
+    externalAttendanceDate = "";
+    externalAttendanceDetailRows = [];
+    externalAttendanceDetailLoading = false;
+    externalAttendanceDetailError = "";
+    externalAttendanceDetailQueryKey = "";
+    externalAttendanceDetailOpen = false;
+    externalAttendanceCountRows = [];
+    externalAttendanceCountLoading = false;
+    externalAttendanceCountError = "";
+    externalAttendanceCountQueryKey = "";
+    destroyExternalAttendanceDetailTabulator();
+  }
 let checkInCameraStream = null;
 let checkInScannerStarting = false;
 let checkInScanning = false;
@@ -355,6 +382,14 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     }
     if (role === "TEACHER" && teacherMode === "choice") {
       renderTeacherChoiceScreen();
+      return;
+    }
+    if ((role === "SCHOOL_ADMIN" && adminMode === "externalAttendance") || (role === "TEACHER" && teacherMode === "externalAttendance")) {
+      if (externalAttendanceStage !== "calendar") {
+        renderExternalAttendanceIntro();
+      } else {
+        renderExternalAttendanceCalendar();
+      }
       return;
     }
     if (role === "TEACHER" && teacherMode === "checkIn" && checkInFlowStage !== "camera") {
@@ -570,6 +605,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         if (teacherMode === "checkIn") {
           checkInFlowStage = "intro";
           checkInSelectionError = "";
+        }
+        if (teacherMode === "externalAttendance") {
+          resetExternalAttendanceState();
         }
         render();
       });
@@ -981,6 +1019,11 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
               <strong>Open invite page</strong>
               <small>Invite school administrators, teachers, or parents from one place.</small>
             </button>
+            <button class="admin-choice-card" data-admin-mode="externalAttendance" type="button">
+              <span>External attendance</span>
+              <strong>Check external student attendance</strong>
+              <small>Choose a site and class, then open the attendance calendar.</small>
+            </button>
           </div>
           ${profileOpen ? profilePanel(profile, user, loadingProfile) : ""}
           ${noticeToast(notice)}
@@ -1338,6 +1381,8 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     }
     const selectedSiteRecord = selectedSite();
     const selectedClassRecord = selectedClass();
+    const todayValue = formatLocalDateForTimezone(new Date(), selectedSiteRecord?.timezone);
+    const classIsScheduledToday = Boolean(selectedClassRecord && isScheduledClassDate(selectedClassRecord, todayValue));
     root.innerHTML = `
       <main class="admin-choice-page check-in-intro-page">
         <section class="admin-choice-shell" aria-labelledby="admin-check-in-title">
@@ -1380,8 +1425,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
               </div>
               ${checkInSelectionError ? `<p class="message error" role="alert">${escapeHtml(checkInSelectionError)}</p>` : ""}
               <p class="check-in-today-count">${escapeHtml(renderTodayCheckInCountText())}</p>
+              ${selectedClassRecord && !classIsScheduledToday ? `<p class="message error" role="alert">No class is scheduled today for the selected class.</p>` : ""}
               <div class="check-in-launch-actions">
-                <button class="check-in-launch-button" data-check-in-start type="button" ${!selectedSiteId || !selectedClassId ? "disabled" : ""}>Check In</button>
+                <button class="check-in-launch-button" data-check-in-start type="button" ${!selectedSiteId || !selectedClassId || !classIsScheduledToday ? "disabled" : ""}>Check In</button>
                 <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedSiteId || !selectedClassId ? "disabled" : ""}>Today's check-in list</button>
               </div>
             </div>
@@ -1464,6 +1510,13 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     root.querySelector("[data-check-in-start]")?.addEventListener("click", () => {
       if (!selectedSiteId || !selectedClassId) {
         checkInSelectionError = "Select a site and class before starting check-in.";
+        render();
+        return;
+      }
+      const classRecord = selectedClass();
+      const todayValue = formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
+      if (classRecord && !isScheduledClassDate(classRecord, todayValue)) {
+        checkInSelectionError = "No class is scheduled today for the selected class.";
         render();
         return;
       }
@@ -1615,6 +1668,15 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     }
     const queryDate = checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
     checkInTodayListDate = queryDate;
+    const classRecord = selectedClass();
+    if (classRecord && !isScheduledClassDate(classRecord, queryDate)) {
+      checkInTodayListRows = [];
+      checkInTodayListCount = 0;
+      checkInTodayListQueryKey = [selectedClassId, queryDate].join(":");
+      checkInTodayListError = "";
+      render();
+      return;
+    }
     const currentQueryKey = [selectedClassId, queryDate].join(":");
     if (!force && checkInTodayListQueryKey === currentQueryKey && checkInTodayListRows.length && !checkInTodayListLoading) {
       return;
@@ -2448,6 +2510,10 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         : "Select a site and class to see today's check-in count.";
     }
     const currentDate = checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
+    const classRecord = selectedClass();
+    if (classRecord && !isScheduledClassDate(classRecord, currentDate)) {
+      return "No class is scheduled today.";
+    }
     const currentQueryKey = [selectedClassId, currentDate].join(":");
     if (checkInTodayListLoading && checkInTodayListQueryKey === currentQueryKey) {
       return "Loading today's check-in count...";
@@ -3532,6 +3598,59 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     return months;
   }
 
+  function externalAttendanceCalendarMonth(monthStart, classRecord) {
+    const monthLabel = monthStart.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    const blanks = Array.from({ length: monthStart.getDay() }, () => `<span class="calendar-day is-empty" aria-hidden="true"></span>`).join("");
+    const days = [];
+    const cursor = new Date(monthStart);
+    while (cursor.getMonth() === monthStart.getMonth()) {
+      const value = localDateValue(cursor);
+      const inRange = Boolean(classRecord?.startDate && classRecord?.endDate && value >= classRecord.startDate && value <= classRecord.endDate);
+      const scheduled = inRange && isScheduledClassDate(classRecord, value);
+      const isSelected = externalAttendanceDate === value;
+      const rowsForDay = isSelected ? externalAttendanceDetailRows : [];
+      const countForDay = externalAttendanceCountRows.find((row) => row.checkDate === value)?.count || 0;
+      const statusClass = !inRange
+        ? "is-unscheduled"
+        : !scheduled
+          ? "is-no-class"
+          : countForDay > 0
+            ? "is-checked"
+            : isSelected
+              ? rowsForDay.length ? "is-checked" : "is-missed"
+              : "is-scheduled";
+      const statusLabel = !inRange
+        ? "No class"
+        : !scheduled
+          ? "No class"
+        : isSelected
+          ? rowsForDay.length ? `${rowsForDay.length} check-ins` : "No check-ins"
+          : "Class day";
+      days.push(`
+        <button
+          class="calendar-day ${statusClass} ${isSelected ? "is-selected" : ""}"
+          data-external-attendance-day="${escapeHtml(value)}"
+          title="${escapeHtml(`${formatDate(value)} - ${statusLabel}`)}"
+          type="button"
+          ${!inRange ? "disabled" : ""}
+        >
+          <strong>${cursor.getDate()}</strong>
+          <small>${escapeHtml(scheduled ? String(countForDay) : "")}</small>
+        </button>
+      `);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return `
+      <section class="attendance-calendar-month">
+        <h4>${escapeHtml(monthLabel)}</h4>
+        <div class="calendar-weekdays" aria-hidden="true">
+          ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<span>${day}</span>`).join("")}
+        </div>
+        <div class="calendar-grid">${blanks}${days.join("")}</div>
+      </section>
+    `;
+  }
+
   function isScheduledClassDate(classRecord, dateValue) {
     if (!classRecord?.startDate || !classRecord?.endDate || dateValue < classRecord.startDate || dateValue > classRecord.endDate) {
       return false;
@@ -3555,6 +3674,151 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       return `${classRecord.name} does not meet on ${weekday}. Scheduled days are ${formatWeekdayList(classRecord.weekdays)}.`;
     }
     return "";
+  }
+
+  async function loadExternalAttendanceDetails(dateValue) {
+    const classRecord = selectedClass();
+    if (!classRecord || !selectedClassId || (role === "SCHOOL_ADMIN" && !selectedSiteId)) {
+      return;
+    }
+    externalAttendanceDate = dateValue;
+    externalAttendanceDetailOpen = true;
+    const queryKey = [selectedClassId, dateValue].join(":");
+    if (externalAttendanceDetailQueryKey === queryKey && externalAttendanceDetailRows.length) {
+      externalAttendanceStage = "calendar";
+      render();
+      return;
+    }
+    externalAttendanceDetailLoading = true;
+    externalAttendanceDetailError = "";
+    externalAttendanceDetailRows = [];
+    externalAttendanceStage = "calendar";
+    render();
+    try {
+      const response = await listExternalCheckIns({
+        tenantId: school.tenantId,
+        classId: selectedClassId,
+        checkDate: dateValue,
+      });
+      externalAttendanceDetailRows = response.checkIns || [];
+      externalAttendanceDetailQueryKey = queryKey;
+    } catch (loadError) {
+      externalAttendanceDetailError = loadError instanceof Error ? loadError.message : "Attendance details could not be loaded.";
+    } finally {
+      externalAttendanceDetailLoading = false;
+      render();
+    }
+  }
+
+  function closeExternalAttendanceDetailModal() {
+    externalAttendanceDetailOpen = false;
+    externalAttendanceDetailLoading = false;
+    externalAttendanceDetailError = "";
+    destroyExternalAttendanceDetailTabulator();
+    render();
+  }
+
+  function renderExternalAttendanceDetailModal() {
+    const classRecord = selectedClass();
+    const rowCount = externalAttendanceDetailRows.length;
+    return `
+      <div class="modal-backdrop" data-external-attendance-detail-modal>
+        <section class="check-in-today-list-panel external-attendance-detail-panel" role="dialog" aria-modal="true" aria-labelledby="external-attendance-detail-title">
+          <div class="workspace-heading workspace-heading-row">
+            <div>
+              <h3 id="external-attendance-detail-title">${escapeHtml(externalAttendanceDate ? formatDate(externalAttendanceDate) : "Attendance list")}</h3>
+              <p>${escapeHtml(classRecord ? classRecord.name : "Class unavailable")}</p>
+              <p class="check-in-selection-count">${escapeHtml(`${rowCount} attendance record${rowCount === 1 ? "" : "s"}.`)}</p>
+            </div>
+            <div class="check-in-students-actions">
+              <button class="secondary-button compact-button" data-external-attendance-detail-close type="button">Close</button>
+            </div>
+          </div>
+          ${externalAttendanceDetailError ? `<p class="message error" role="alert">${escapeHtml(externalAttendanceDetailError)}</p>` : ""}
+          ${externalAttendanceDetailLoading ? `<p class="context-note">Loading attendance details...</p>` : ""}
+          <div class="check-in-students-table-shell external-attendance-detail-table-shell">
+            <div data-external-attendance-detail-tabulator class="check-in-students-tabulator external-attendance-detail-tabulator"></div>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  async function loadExternalAttendanceCounts() {
+    const classRecord = selectedClass();
+    if (!classRecord || !selectedClassId || !classRecord.startDate || !classRecord.endDate || externalAttendanceCountLoading) {
+      return;
+    }
+    const queryKey = [selectedClassId, classRecord.startDate, classRecord.endDate].join(":");
+    if (externalAttendanceCountQueryKey === queryKey && externalAttendanceCountRows.length) {
+      return;
+    }
+    externalAttendanceCountLoading = true;
+    externalAttendanceCountError = "";
+    render();
+    try {
+      const response = await listExternalCheckInCounts({
+        tenantId: school.tenantId,
+        classId: selectedClassId,
+        startDate: classRecord.startDate,
+        endDate: classRecord.endDate,
+      });
+      externalAttendanceCountRows = response || [];
+      externalAttendanceCountQueryKey = queryKey;
+    } catch (loadError) {
+      externalAttendanceCountError = loadError instanceof Error ? loadError.message : "Attendance counts could not be loaded.";
+      externalAttendanceCountRows = [];
+      externalAttendanceCountQueryKey = queryKey;
+    } finally {
+      externalAttendanceCountLoading = false;
+      render();
+    }
+  }
+
+  function destroyExternalAttendanceDetailTabulator() {
+    if (externalAttendanceDetailTabulator) {
+      externalAttendanceDetailTabulator.destroy();
+      externalAttendanceDetailTabulator = null;
+    }
+  }
+
+  async function initializeExternalAttendanceDetailTabulator() {
+    const element = root.querySelector("[data-external-attendance-detail-tabulator]");
+    if (!element || !externalAttendanceDetailOpen) {
+      return;
+    }
+
+    const Tabulator = await loadTabulator();
+    if (!element.isConnected || !externalAttendanceDetailOpen) {
+      return;
+    }
+
+    destroyExternalAttendanceDetailTabulator();
+    externalAttendanceDetailTabulator = new Tabulator(element, {
+      data: externalAttendanceDetailRows.map((row) => ({
+        checkedInAt: row.checkInTime || "",
+        studentName: row.studentName || "-",
+        externalStudentId: row.externalStudentId || "-",
+        gender: row.gender || "-",
+        checkedInByRole: row.checkedInByRole || "-",
+        barcodeValue: row.barcodeValue || "",
+      })),
+      columns: [
+        { title: "Time", field: "checkedInAt", width: 130, formatter: (cell) => formatCheckInTime(cell.getValue()) },
+        { title: "Student", field: "studentName", headerFilter: "input", minWidth: 180 },
+        { title: "StudentID", field: "externalStudentId", headerFilter: "input", width: 150 },
+        { title: "Gender", field: "gender", headerFilter: "input", width: 110 },
+        { title: "Checked by", field: "checkedInByRole", headerFilter: "input", width: 150 },
+      ],
+      height: "100%",
+      layout: "fitColumns",
+      placeholder: externalAttendanceDetailLoading ? "Loading..." : "No attendance records for this day.",
+      movableColumns: true,
+      selectableRows: false,
+      columnDefaults: {
+        vertAlign: "middle",
+      },
+    });
   }
 
   function parentPaymentList(rows) {
@@ -4870,6 +5134,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         <button class="${teacherMode === "choice" ? "is-active" : ""}" data-teacher-mode="choice" type="button">Choice screen</button>
         <button class="${teacherMode === "main" ? "is-active" : ""}" data-teacher-mode="main" type="button">Main UI</button>
         <button class="${teacherMode === "checkIn" ? "is-active" : ""}" data-teacher-mode="checkIn" type="button">Check in</button>
+        <button class="${teacherMode === "externalAttendance" ? "is-active" : ""}" data-teacher-mode="externalAttendance" type="button">External attendance</button>
       </div>
     `;
   }
@@ -4900,6 +5165,11 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
               <strong>Open camera check-in</strong>
               <small>Choose one of your classes and start the check-in camera flow.</small>
             </button>
+            <button class="admin-choice-card" data-teacher-enter-external-attendance type="button">
+              <span>External attendance</span>
+              <strong>Open attendance calendar</strong>
+              <small>Review external student attendance for one of your classes.</small>
+            </button>
           </div>
         </section>
       </main>
@@ -4917,10 +5187,17 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       checkInSelectionError = "";
       render();
     });
+    root.querySelector("[data-teacher-enter-external-attendance]")?.addEventListener("click", () => {
+      teacherMode = "externalAttendance";
+      resetExternalAttendanceState();
+      render();
+    });
   }
 
   function renderTeacherCheckInIntro() {
     const selectedClassRecord = selectedClass();
+    const todayValue = localDateValue(new Date());
+    const classIsScheduledToday = Boolean(selectedClassRecord && isScheduledClassDate(selectedClassRecord, todayValue));
     root.innerHTML = `
       <main class="admin-choice-page check-in-intro-page">
         <section class="admin-choice-shell" aria-labelledby="teacher-check-in-title">
@@ -4953,8 +5230,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                 </label>
                 ${checkInSelectionError ? `<p class="message error" role="alert">${escapeHtml(checkInSelectionError)}</p>` : ""}
                 <p class="check-in-today-count">${escapeHtml(renderTodayCheckInCountText())}</p>
+                ${selectedClassRecord && !classIsScheduledToday ? `<p class="message error" role="alert">No class is scheduled today for the selected class.</p>` : ""}
                 <div class="check-in-launch-actions">
-                  <button class="check-in-launch-button" data-teacher-check-in-start type="button" ${!selectedClassId ? "disabled" : ""}>Check In</button>
+                  <button class="check-in-launch-button" data-teacher-check-in-start type="button" ${!selectedClassId || !classIsScheduledToday ? "disabled" : ""}>Check In</button>
                   <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedClassId ? "disabled" : ""}>Today's check-in list</button>
                 </div>
               </div>
@@ -4987,6 +5265,13 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     root.querySelector("[data-teacher-check-in-start]")?.addEventListener("click", () => {
       if (!selectedClassId) {
         checkInSelectionError = "Select a class before starting check-in.";
+        render();
+        return;
+      }
+      const classRecord = selectedClass();
+      const todayValue = localDateValue(new Date());
+      if (classRecord && !isScheduledClassDate(classRecord, todayValue)) {
+        checkInSelectionError = "No class is scheduled today for the selected class.";
         render();
         return;
       }
@@ -5051,6 +5336,192 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       }
     });
     startCheckInScanner();
+  }
+
+  function renderExternalAttendanceIntro() {
+    if (role === "SCHOOL_ADMIN" && !loadingSites && !sites.length) {
+      loadSites();
+    }
+    if (role === "SCHOOL_ADMIN" && !selectedSiteId && sites.length) {
+      selectedSiteId = selectedSiteId || sites[0].id;
+    }
+    if (role === "SCHOOL_ADMIN" && selectedSiteId && !loadingClasses && !classes.length) {
+      loadClasses();
+    }
+    if (role === "TEACHER" && !classes.length && !loadingClasses) {
+      loadTeacherClasses();
+    }
+    if (classes.length && !selectedClassId) {
+      selectedClassId = classes[0].id;
+    }
+    const currentSite = selectedSite();
+    const currentClass = selectedClass();
+    root.innerHTML = `
+      <main class="admin-choice-page">
+        <section class="admin-choice-shell" aria-labelledby="external-attendance-title">
+          <header class="app-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(school.name)}</p>
+              <h2 id="external-attendance-title">External attendance</h2>
+              <p>Choose a class, then open the external student attendance calendar.</p>
+            </div>
+            <div class="header-actions">
+              <button class="secondary-button compact-button" data-external-attendance-back type="button">Back</button>
+              <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+            </div>
+          </header>
+
+          <div class="admin-choice-grid">
+            <section class="admin-choice-card teacher-check-in-card">
+              <span>Attendance query</span>
+              <strong>Choose site and class</strong>
+              <small>${role === "TEACHER"
+                ? "Teachers choose a class. School admins choose a site, then a class."
+                : "Pick a site, then one of its classes before querying attendance."}</small>
+              <div class="teacher-check-in-card-body">
+                ${role === "SCHOOL_ADMIN" ? `
+                  <label class="check-in-selector-field">
+                    <span>Site</span>
+                    <select data-external-attendance-site-select ${loadingSites ? "disabled" : ""}>
+                      <option value="">Select site</option>
+                      ${sites.map((site) => `<option value="${escapeHtml(site.id)}"${site.id === selectedSiteId ? " selected" : ""}>${escapeHtml(site.name)}</option>`).join("")}
+                    </select>
+                  </label>
+                ` : ""}
+                <label class="check-in-selector-field">
+                  <span>Class</span>
+                  <select data-external-attendance-class-select ${role === "SCHOOL_ADMIN" && (!selectedSiteId || loadingClasses) ? "disabled" : loadingClasses ? "disabled" : ""}>
+                    <option value="">Select class</option>
+                    ${classes.map((classRecord) => `<option value="${escapeHtml(classRecord.id)}"${classRecord.id === selectedClassId ? " selected" : ""}>${escapeHtml(classRecord.name)}</option>`).join("")}
+                  </select>
+                </label>
+                ${externalAttendanceDetailError ? `<p class="message error" role="alert">${escapeHtml(externalAttendanceDetailError)}</p>` : ""}
+                <p class="check-in-today-count">${escapeHtml(currentSite ? `Site: ${currentSite.name}` : role === "TEACHER" ? "Class list loaded from your assigned classes." : "Choose a site to load classes.")}</p>
+                <div class="check-in-launch-actions">
+                  <button class="check-in-launch-button" data-external-attendance-query type="button" ${!selectedClassId || (role === "SCHOOL_ADMIN" && !selectedSiteId) ? "disabled" : ""}>Query</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    `;
+
+    root.querySelector("[data-logout]")?.addEventListener("click", handleLogout);
+    root.querySelector("[data-external-attendance-back]")?.addEventListener("click", () => {
+      if (role === "SCHOOL_ADMIN") {
+        adminMode = "";
+      } else {
+        teacherMode = "choice";
+      }
+      resetExternalAttendanceState();
+      render();
+    });
+    root.querySelector("[data-external-attendance-site-select]")?.addEventListener("change", (event) => {
+      selectedSiteId = event.currentTarget.value;
+      selectedClassId = "";
+      resetExternalAttendanceState();
+      render();
+      if (selectedSiteId) {
+        loadClasses();
+      }
+    });
+    root.querySelector("[data-external-attendance-class-select]")?.addEventListener("change", (event) => {
+      selectedClassId = event.currentTarget.value;
+      resetExternalAttendanceState();
+      render();
+    });
+    root.querySelector("[data-external-attendance-query]")?.addEventListener("click", () => {
+      if (role === "SCHOOL_ADMIN" && !selectedSiteId) {
+        externalAttendanceDetailError = "Choose a site before querying attendance.";
+        render();
+        return;
+      }
+      if (!selectedClassId) {
+        externalAttendanceDetailError = role === "TEACHER"
+          ? "Choose a class before querying attendance."
+          : "Choose a class before querying attendance.";
+        render();
+        return;
+      }
+      externalAttendanceStage = "calendar";
+      externalAttendanceDetailError = "";
+      externalAttendanceDetailRows = [];
+      externalAttendanceDate = "";
+      externalAttendanceDetailOpen = false;
+      render();
+    });
+  }
+
+  function renderExternalAttendanceCalendar() {
+    const classRecord = selectedClass();
+    const months = classRecord ? calendarMonths(classRecord.startDate, classRecord.endDate) : [];
+    if (classRecord && !externalAttendanceCountLoading && externalAttendanceCountQueryKey !== [selectedClassId, classRecord.startDate, classRecord.endDate].join(":")) {
+      void loadExternalAttendanceCounts();
+    }
+    root.innerHTML = `
+      <main class="admin-choice-page">
+        <section class="admin-choice-shell" aria-labelledby="external-attendance-calendar-title">
+          <header class="app-header">
+            <div>
+              <p class="eyebrow">${escapeHtml(school.name)}</p>
+              <h2 id="external-attendance-calendar-title">External attendance</h2>
+              <p>${escapeHtml(classRecord ? `${classRecord.name} - ${enrollmentDateRange(classRecord)}` : "Choose a class to open the attendance calendar.")}</p>
+            </div>
+            <div class="header-actions">
+              <button class="secondary-button compact-button" data-external-attendance-back type="button">Back</button>
+              <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+            </div>
+          </header>
+
+          <div class="attendance-calendar-panel external-attendance-calendar-panel" aria-label="External student attendance calendar">
+          <div class="attendance-calendar-legend">
+            <span><i class="calendar-key checked"></i>Has check-ins</span>
+            <span><i class="calendar-key scheduled"></i>Class day</span>
+            <span><i class="calendar-key no-class"></i>No class</span>
+          </div>
+          ${externalAttendanceCountError ? `<p class="message error" role="alert">${escapeHtml(externalAttendanceCountError)}</p>` : ""}
+            <div class="attendance-calendar-months">
+              ${months.length
+                ? months.map((month) => externalAttendanceCalendarMonth(month, classRecord)).join("")
+                : `<div class="data-list"><div class="data-row">Class dates are unavailable.</div></div>`}
+            </div>
+          </div>
+
+        </section>
+      </main>
+      ${externalAttendanceDetailOpen ? renderExternalAttendanceDetailModal() : ""}
+    `;
+
+    root.querySelector("[data-logout]")?.addEventListener("click", handleLogout);
+    root.querySelectorAll("[data-external-attendance-day]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const dateValue = button.dataset.externalAttendanceDay;
+        if (!dateValue || button.disabled) {
+          return;
+        }
+        externalAttendanceDetailOpen = true;
+        void loadExternalAttendanceDetails(dateValue);
+      });
+    });
+    root.querySelectorAll("[data-external-attendance-back]")?.forEach((button) => {
+      button.addEventListener("click", () => {
+        externalAttendanceStage = "intro";
+        externalAttendanceDetailError = "";
+        externalAttendanceDetailRows = [];
+        externalAttendanceDate = "";
+        render();
+      });
+    });
+    root.querySelector("[data-external-attendance-detail-close]")?.addEventListener("click", closeExternalAttendanceDetailModal);
+    root.querySelector("[data-external-attendance-detail-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeExternalAttendanceDetailModal();
+      }
+    });
+    if (externalAttendanceDetailOpen) {
+      void initializeExternalAttendanceDetailTabulator();
+    }
   }
 }
 

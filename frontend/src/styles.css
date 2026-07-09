@@ -1632,16 +1632,22 @@ button:disabled {
 }
 
 .calendar-key.checked {
+  background: #9fd8b2;
+  border-color: #3f9c5a;
+}
+
+.calendar-key.scheduled {
   background: #dff5e8;
   border-color: #63c184;
 }
 
-.calendar-key.scheduled {
-  background: #f8fbff;
-}
-
 .calendar-key.unscheduled {
   background: #f5f7fb;
+}
+
+.calendar-key.no-class {
+  background: #f0f3f8;
+  border-style: dashed;
 }
 
 .calendar-key.missed {
@@ -1691,6 +1697,23 @@ button:disabled {
   padding: 4px 2px;
 }
 
+button.calendar-day {
+  cursor: pointer;
+  font: inherit;
+  background: #ffffff;
+  appearance: none;
+}
+
+button.calendar-day:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+button.calendar-day.is-selected {
+  outline: 2px solid #2d6cdf;
+  outline-offset: 1px;
+}
+
 .calendar-day strong {
   font-size: 0.9rem;
 }
@@ -1711,7 +1734,14 @@ button:disabled {
 }
 
 .calendar-day.is-scheduled {
-  background: #f8fbff;
+  background: #dff5e8;
+  border-color: #63c184;
+}
+
+.calendar-day.is-no-class {
+  background: #f0f3f8;
+  color: #8a97ab;
+  border-style: dashed;
 }
 
 .calendar-day.is-missed {
@@ -1720,8 +1750,8 @@ button:disabled {
 }
 
 .calendar-day.is-checked {
-  background: #dff5e8;
-  border-color: #63c184;
+  background: #9fd8b2;
+  border-color: #3f9c5a;
 }
 
 .admin-attendance-calendar .calendar-day small {
@@ -2191,6 +2221,11 @@ button:disabled {
   width: 100%;
 }
 
+.teacher-check-in-card-body {
+  display: grid;
+  gap: 12px;
+}
+
 .check-in-selector-field {
   display: grid;
   gap: 8px;
@@ -2337,6 +2372,23 @@ button:disabled {
   gap: 12px;
   max-height: 100%;
   overflow: auto;
+}
+
+.external-attendance-detail-panel {
+  width: min(100%, 1180px);
+}
+
+.external-attendance-detail-table-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.external-attendance-detail-tabulator {
+  min-height: 460px;
+}
+
+.external-attendance-detail-tabulator .tabulator {
+  height: 100%;
 }
 
 .check-in-today-list-empty {

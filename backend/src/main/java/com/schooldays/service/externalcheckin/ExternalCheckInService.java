@@ -1,6 +1,7 @@
 package com.schooldays.service.externalcheckin;
 
 import static org.jooq.impl.DSL.field;
+import static org.jooq.impl.DSL.count;
 import static org.jooq.impl.DSL.name;
 import static org.jooq.impl.DSL.table;
 import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
@@ -8,12 +9,14 @@ import static com.schooldays.jooq.generated.tables.TeacherAssignments.TEACHER_AS
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.schooldays.dto.externalcheckin.ExternalCheckInListResponse;
+import com.schooldays.dto.externalcheckin.ExternalCheckInDateCountResponse;
 import com.schooldays.dto.externalcheckin.ExternalCheckInRequest;
 import com.schooldays.dto.externalcheckin.ExternalCheckInResponse;
 import com.schooldays.dto.externalcheckin.ExternalCheckInRowResponse;
@@ -27,7 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
+import com.schooldays.jooq.generated.tables.records.ClassesRecord;
 
 @Service
 public class ExternalCheckInService {
@@ -74,8 +77,9 @@ public class ExternalCheckInService {
         }
 
         ensureExternalStudentExists(tenantId, request.externalStudentId());
-        String className = ensureClassExists(tenantId, request.classId());
+        ClassesRecord classRecord = ensureClassExists(tenantId, request.classId());
         ensureCheckInPermission(tenantId, request.classId(), checkedInByUserId, checkedInByRole);
+        ensureScheduledClassDate(classRecord, request.checkDate());
         OffsetDateTime now = OffsetDateTime.now();
         JSONB metadata = metadataFor(request);
 
@@ -144,7 +148,7 @@ public class ExternalCheckInService {
                 record.get(TENANT_ID),
                 record.get(EXTERNAL_STUDENT_ID),
                 record.get(CLASS_ID),
-                className,
+                classRecord.getName(),
                 record.get(CHECK_DATE),
                 record.get(CHECK_IN_TIME),
                 record.get(CHECKED_IN_BY_USER_ID),
@@ -165,8 +169,9 @@ public class ExternalCheckInService {
         if (checkDate == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "checkDate is required");
         }
-        ensureClassExists(tenantId, classId);
+        ClassesRecord classRecord = ensureClassExists(tenantId, classId);
         ensureCheckInPermission(tenantId, classId, checkedInByUserId, checkedInByRole);
+        ensureScheduledClassDate(classRecord, checkDate);
 
         var e = table(name("external_check_ins")).as("e");
         var s = table(name("external_students")).as("s");
@@ -224,6 +229,40 @@ public class ExternalCheckInService {
         return new ExternalCheckInListResponse(rows);
     }
 
+    public List<ExternalCheckInDateCountResponse> listCheckInCounts(
+            UUID tenantId,
+            UUID classId,
+            LocalDate startDate,
+            LocalDate endDate,
+            UUID checkedInByUserId,
+            String checkedInByRole
+    ) {
+        if (startDate == null || endDate == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startDate and endDate are required");
+        }
+        if (endDate.isBefore(startDate)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "endDate must be on or after startDate");
+        }
+        ClassesRecord classRecord = ensureClassExists(tenantId, classId);
+        ensureCheckInPermission(tenantId, classId, checkedInByUserId, checkedInByRole);
+        ensureDateRangeWithinClass(classRecord, startDate, endDate);
+
+        return dsl.select(CHECK_DATE, count().as("check_in_count"))
+                .from(EXTERNAL_CHECK_INS)
+                .where(TENANT_ID.eq(tenantId))
+                .and(CLASS_ID.eq(classId))
+                .and(CHECK_DATE.between(startDate, endDate))
+                .groupBy(CHECK_DATE)
+                .orderBy(CHECK_DATE.asc())
+                .fetch(record -> {
+                    Number countValue = record.getValue(1, Number.class);
+                    return new ExternalCheckInDateCountResponse(
+                            record.get(CHECK_DATE),
+                            countValue == null ? 0L : countValue.longValue()
+                    );
+                });
+    }
+
     private void ensureExternalStudentExists(UUID tenantId, String externalStudentId) {
         boolean exists = dsl.fetchExists(dsl.selectOne()
                 .from(EXTERNAL_STUDENTS)
@@ -234,16 +273,15 @@ public class ExternalCheckInService {
         }
     }
 
-    private String ensureClassExists(UUID tenantId, UUID classId) {
-        String className = dsl.select(CLASSES.NAME)
-                .from(CLASSES)
+    private ClassesRecord ensureClassExists(UUID tenantId, UUID classId) {
+        ClassesRecord classRecord = dsl.selectFrom(CLASSES)
                 .where(CLASSES.TENANT_ID.eq(tenantId))
                 .and(CLASSES.ID.eq(classId))
-                .fetchOne(CLASSES.NAME);
-        if (className == null) {
+                .fetchOneInto(ClassesRecord.class);
+        if (classRecord == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found");
         }
-        return className;
+        return classRecord;
     }
 
     private void ensureCheckInPermission(UUID tenantId, UUID classId, UUID checkedInByUserId, String checkedInByRole) {
@@ -261,6 +299,33 @@ public class ExternalCheckInService {
                 .and(TEACHER_ASSIGNMENTS.TEACHER_USER_ID.eq(checkedInByUserId)));
         if (!assigned) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Teachers can only check in for their assigned classes");
+        }
+    }
+
+    private void ensureScheduledClassDate(ClassesRecord classRecord, LocalDate checkDate) {
+        if (classRecord.getStartDate() != null && checkDate.isBefore(classRecord.getStartDate())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This class does not meet on the selected date");
+        }
+        if (classRecord.getEndDate() != null && checkDate.isAfter(classRecord.getEndDate())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This class does not meet on the selected date");
+        }
+        JsonNode metadata = classMetadata(classRecord);
+        String classType = metadata.path("classType").asText("");
+        List<String> weekdays = weekdays(metadata);
+        boolean scheduled = !"weekly".equalsIgnoreCase(classType)
+                || weekdays.isEmpty()
+                || weekdays.contains(checkDate.getDayOfWeek().name());
+        if (!scheduled) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This class does not meet on the selected date");
+        }
+    }
+
+    private void ensureDateRangeWithinClass(ClassesRecord classRecord, LocalDate startDate, LocalDate endDate) {
+        if (classRecord.getStartDate() != null && startDate.isBefore(classRecord.getStartDate())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Requested date range is outside the class schedule");
+        }
+        if (classRecord.getEndDate() != null && endDate.isAfter(classRecord.getEndDate())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Requested date range is outside the class schedule");
         }
     }
 
@@ -284,6 +349,26 @@ public class ExternalCheckInService {
         } catch (Exception exception) {
             return OBJECT_MAPPER.createObjectNode();
         }
+    }
+
+    private JsonNode classMetadata(ClassesRecord classRecord) {
+        try {
+            return OBJECT_MAPPER.readTree(classRecord.getMetadata() == null ? "{}" : classRecord.getMetadata().data());
+        } catch (Exception exception) {
+            return OBJECT_MAPPER.createObjectNode();
+        }
+    }
+
+    private List<String> weekdays(JsonNode metadata) {
+        JsonNode weekdays = metadata.path("weekdays");
+        if (!weekdays.isArray()) {
+            return List.of();
+        }
+        return java.util.stream.StreamSupport.stream(weekdays.spliterator(), false)
+                .map(JsonNode::asText)
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.trim().toUpperCase())
+                .toList();
     }
 
     private String metadataText(JsonNode node, String field) {
