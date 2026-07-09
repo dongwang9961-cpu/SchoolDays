@@ -169,9 +169,12 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
     public ResponseEntity<ExternalStudentListResponse> listExternalStudents(
             @PathVariable("tenantId") UUID tenantId,
-            @RequestParam(value = "page", defaultValue = "1") int page,
-            @RequestParam(value = "pageSize", defaultValue = "25") int pageSize
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "pageSize", required = false) Integer pageSize
     ) {
+        if (page == null || pageSize == null) {
+            return ResponseEntity.ok(externalStudentImportService.listStudents(tenantId));
+        }
         return ResponseEntity.ok(externalStudentImportService.listStudents(tenantId, page, pageSize));
     }
 

@@ -9,6 +9,7 @@ import { getClassPricing, getTenantClassPricing, saveClassPricing } from "./api/
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
 import { createSite, listSites, updateSite } from "./api/sites.js";
 import { listStudents } from "./api/students.js";
+import QRCode from "qrcode";
 import {
   listNotificationHistory,
   listNotificationProviders,
@@ -286,6 +287,8 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let checkInStudentsLoading = false;
   let checkInStudents = [];
   let checkInStudentsError = "";
+  let checkInStudentsMessage = "";
+  let checkInStudentsSelectedCount = 0;
   let checkInStudentsTabulator = null;
   let checkInStudentsPage = 1;
   let checkInStudentsPageSize = 25;
@@ -1309,18 +1312,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       }
     });
     root.querySelector("[data-check-in-students-close]")?.addEventListener("click", closeCheckInStudentsModal);
-    root.querySelector("[data-check-in-students-prev]")?.addEventListener("click", () => {
-      if (checkInStudentsPage > 1) {
-        checkInStudentsPage -= 1;
-        loadCheckInStudents();
-      }
-    });
-    root.querySelector("[data-check-in-students-next]")?.addEventListener("click", () => {
-      if (checkInStudentsPage < checkInStudentsTotalPages) {
-        checkInStudentsPage += 1;
-        loadCheckInStudents();
-      }
-    });
+    root.querySelector("[data-check-in-students-print]")?.addEventListener("click", handlePrintSelectedStudentCards);
     initializeCheckInStudentsTabulator();
   }
 
@@ -1372,6 +1364,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   async function handleShowCheckInStudents() {
     checkInStudentsOpen = true;
     checkInStudentsError = "";
+    checkInStudentsMessage = "";
     checkInStudentsPage = 1;
     render();
     await loadCheckInStudents();
@@ -1380,6 +1373,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   function closeCheckInStudentsModal() {
     checkInStudentsOpen = false;
     checkInStudentsError = "";
+    checkInStudentsMessage = "";
     destroyCheckInStudentsTabulator();
     render();
   }
@@ -1391,16 +1385,12 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     checkInStudentsLoading = true;
     render();
     try {
-      const response = await listExternalStudents({
-        tenantId: school.tenantId,
-        page: checkInStudentsPage,
-        pageSize: checkInStudentsPageSize,
-      });
+      const response = await listExternalStudents({ tenantId: school.tenantId });
       checkInStudents = response.students || [];
-      checkInStudentsPage = response.page || checkInStudentsPage;
-      checkInStudentsPageSize = response.pageSize || checkInStudentsPageSize;
       checkInStudentsTotalRows = response.totalRows || 0;
-      checkInStudentsTotalPages = response.totalPages || 1;
+      checkInStudentsPage = 1;
+      checkInStudentsPageSize = checkInStudents.length || 25;
+      checkInStudentsTotalPages = 1;
     } catch (loadError) {
       checkInStudentsError = loadError instanceof Error ? loadError.message : "Students could not be loaded.";
     } finally {
@@ -1419,6 +1409,14 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
     }
   }
 
+  function updateCheckInSelectionCount(count) {
+    checkInStudentsSelectedCount = count;
+    const label = root.querySelector("[data-check-in-selection-count]");
+    if (label) {
+      label.textContent = `${count} student${count === 1 ? "" : "s"} selected.`;
+    }
+  }
+
   function renderCheckInStudentsModal() {
     return `
       <div class="modal-backdrop" data-check-in-students-modal>
@@ -1427,17 +1425,17 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
             <div>
               <h3 id="check-in-students-title">External students</h3>
               <p>${escapeHtml(checkInStudentsLoading ? "Loading imported students..." : `${(checkInStudentsTotalRows || checkInStudents.length)} student${(checkInStudentsTotalRows || checkInStudents.length) === 1 ? "" : "s"}.`)}</p>
+              <p class="check-in-selection-count" data-check-in-selection-count>${escapeHtml(`${checkInStudentsSelectedCount} student${checkInStudentsSelectedCount === 1 ? "" : "s"} selected.`)}</p>
             </div>
-            <button class="secondary-button compact-button" data-check-in-students-close type="button">Close</button>
+            <div class="check-in-students-actions">
+              <button class="secondary-button compact-button" data-check-in-students-print type="button" ${checkInStudentsLoading || !checkInStudentsTabulator ? "disabled" : ""}>Print student card</button>
+              <button class="secondary-button compact-button" data-check-in-students-close type="button">Close</button>
+            </div>
           </div>
           ${checkInStudentsError ? `<p class="message error" role="alert">${escapeHtml(checkInStudentsError)}</p>` : ""}
+          ${checkInStudentsMessage ? `<p class="message success" role="status">${escapeHtml(checkInStudentsMessage)}</p>` : ""}
           <div class="check-in-students-table-shell">
             <div data-check-in-students-tabulator class="check-in-students-tabulator"></div>
-          </div>
-          <div class="check-in-pagination-bar">
-            <button class="secondary-button compact-button" data-check-in-students-prev type="button" ${checkInStudentsPage <= 1 || checkInStudentsLoading ? "disabled" : ""}>Prev</button>
-            <span>Page ${escapeHtml(String(checkInStudentsPage))} of ${escapeHtml(String(checkInStudentsTotalPages))}</span>
-            <button class="secondary-button compact-button" data-check-in-students-next type="button" ${checkInStudentsPage >= checkInStudentsTotalPages || checkInStudentsLoading ? "disabled" : ""}>Next</button>
           </div>
         </section>
       </div>
@@ -1449,6 +1447,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       checkInStudentsTabulator.destroy();
       checkInStudentsTabulator = null;
     }
+    updateCheckInSelectionCount(0);
   }
 
   async function initializeCheckInStudentsTabulator() {
@@ -1494,11 +1493,167 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
       layout: "fitDataFill",
       placeholder: checkInStudentsLoading ? "Loading..." : "No external students imported yet.",
       movableColumns: true,
-      selectable: true,
+      selectableRows: true,
       columnDefaults: {
         vertAlign: "middle",
       },
     });
+    checkInStudentsTabulator.on("rowSelectionChanged", (selectedData) => {
+      updateCheckInSelectionCount(Array.isArray(selectedData) ? selectedData.length : 0);
+    });
+    updateCheckInSelectionCount(checkInStudentsTabulator.getSelectedData?.().length || 0);
+  }
+
+  async function handlePrintSelectedStudentCards() {
+    if (!checkInStudentsTabulator) {
+      checkInStudentsError = "Load the student list before printing cards.";
+      render();
+      return;
+    }
+
+    const selectedStudents = checkInStudentsTabulator.getSelectedData?.() || [];
+    checkInStudentsSelectedCount = selectedStudents.length;
+    if (!selectedStudents.length) {
+      checkInStudentsError = "Select at least one student in the spreadsheet before printing.";
+      checkInStudentsMessage = "";
+      render();
+      return;
+    }
+
+    checkInStudentsError = "";
+    checkInStudentsMessage = `Preparing ${selectedStudents.length} card${selectedStudents.length === 1 ? "" : "s"} for printing...`;
+    render();
+
+    let printFrame;
+    try {
+      const cards = await Promise.all(
+        selectedStudents.map(async (student) => {
+          const displayName = student.studentName || [student.firstName, student.lastName].filter(Boolean).join(" ") || "Student";
+          const studentId = student.externalId || "";
+          const gender = student.genderCode || "";
+          const qrPayload = JSON.stringify({
+            studentId,
+            name: displayName,
+            gender,
+          });
+          const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+            errorCorrectionLevel: "M",
+            margin: 1,
+            width: 220,
+          });
+          return { displayName, studentId, gender, qrDataUrl };
+        }),
+      );
+
+      const styles = `
+        <style>
+          @page { size: auto; margin: 12mm; }
+          :root { color: #172033; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+          body { margin: 0; padding: 0; }
+          .sheet { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+          .card { border: 1px solid #172033; border-radius: 10px; display: grid; gap: 12px; padding: 14px; break-inside: avoid; }
+          .title { font-size: 1.1rem; font-weight: 900; margin: 0; }
+          .details { display: grid; gap: 6px; }
+          .detail { font-size: 0.95rem; line-height: 1.35; }
+          .detail strong { display: inline-block; min-width: 82px; }
+          .qr { align-items: center; display: flex; justify-content: center; }
+          .qr img { height: 160px; width: 160px; }
+        </style>
+      `;
+
+      const html = `
+        <!doctype html>
+        <html>
+          <head>
+            <title>Student cards</title>
+            ${styles}
+          </head>
+          <body>
+            <div class="sheet">
+              ${cards
+                .map(
+                  (card) => `
+                    <section class="card">
+                      <h1 class="title">${escapeHtml(card.displayName)}</h1>
+                      <div class="details">
+                        <div class="detail"><strong>Student ID</strong> ${escapeHtml(card.studentId || "-")}</div>
+                        <div class="detail"><strong>Gender</strong> ${escapeHtml(card.gender || "-")}</div>
+                      </div>
+                      <div class="qr"><img alt="QR code for ${escapeHtml(card.displayName)}" src="${card.qrDataUrl}" /></div>
+                    </section>
+                  `,
+                )
+                .join("")}
+            </div>
+          </body>
+        </html>
+      `;
+
+      printFrame = document.createElement("iframe");
+      printFrame.setAttribute("aria-hidden", "true");
+      printFrame.style.position = "fixed";
+      printFrame.style.width = "1px";
+      printFrame.style.height = "1px";
+      printFrame.style.border = "0";
+      printFrame.style.left = "-9999px";
+      printFrame.style.top = "0";
+      printFrame.style.opacity = "0";
+      document.body.appendChild(printFrame);
+
+      const frameWindow = printFrame.contentWindow;
+      const frameDocument = printFrame.contentDocument;
+      if (!frameWindow || !frameDocument) {
+        throw new Error("Student cards could not be prepared for printing.");
+      }
+
+      frameDocument.open();
+      frameDocument.write(html);
+      frameDocument.close();
+
+      await new Promise((resolve, reject) => {
+        const finish = async () => {
+          try {
+            const images = Array.from(frameDocument.images || []);
+            await Promise.all(
+              images.map((image) =>
+                image.complete
+                  ? Promise.resolve()
+                  : new Promise((imageResolve, imageReject) => {
+                      image.addEventListener("load", imageResolve, { once: true });
+                      image.addEventListener("error", imageReject, { once: true });
+                    }),
+              ),
+            );
+            await new Promise((animationResolve) => frameWindow.requestAnimationFrame(() => frameWindow.requestAnimationFrame(animationResolve)));
+            const cleanup = () => {
+              frameWindow.removeEventListener("afterprint", cleanup);
+              if (printFrame && printFrame.parentNode) {
+                printFrame.parentNode.removeChild(printFrame);
+              }
+            };
+            frameWindow.addEventListener("afterprint", cleanup, { once: true });
+            frameWindow.focus();
+            frameWindow.print();
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        };
+
+        if (frameDocument.readyState === "complete") {
+          finish();
+        } else {
+          printFrame.addEventListener("load", finish, { once: true });
+        }
+      });
+
+      checkInStudentsMessage = `${selectedStudents.length} student card${selectedStudents.length === 1 ? "" : "s"} ready to print.`;
+    } catch (printError) {
+      checkInStudentsMessage = "";
+      checkInStudentsError = printError instanceof Error ? printError.message : "Student cards could not be printed.";
+    } finally {
+      render();
+    }
   }
 
   function initializeInviteUserPage() {

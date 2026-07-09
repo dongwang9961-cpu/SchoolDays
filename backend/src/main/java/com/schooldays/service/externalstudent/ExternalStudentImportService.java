@@ -129,7 +129,36 @@ public class ExternalStudentImportService {
     }
 
     public ExternalStudentListResponse listStudents(UUID tenantId) {
-        return listStudents(tenantId, 1, 25);
+        List<ExternalStudentRowResponse> students = dsl.select(
+                        EXTERNAL_ID,
+                        STUDENT_NAME,
+                        GENDER,
+                        BIRTH_DATE,
+                        METADATA
+                )
+                .from(EXTERNAL_STUDENTS)
+                .where(TENANT_ID.eq(tenantId))
+                .orderBy(SEQ_ID.asc())
+                .fetch(record -> {
+                    String externalId = record.get(EXTERNAL_ID);
+                    String studentName = record.get(STUDENT_NAME);
+                    String gender = record.get(GENDER);
+                    LocalDate birthDate = record.get(BIRTH_DATE);
+                    JSONB metadata = record.get(METADATA);
+                    JsonNode metadataNode = readMetadata(metadata);
+                    return new ExternalStudentRowResponse(
+                            externalId,
+                            studentName,
+                            metadataText(metadataNode, "lastName"),
+                            metadataText(metadataNode, "firstName"),
+                            birthDate,
+                            metadataText(metadataNode, "gradeLevelCode"),
+                            metadataText(metadataNode, "genderCode")
+                    );
+                });
+
+        long totalRows = students.size();
+        return new ExternalStudentListResponse(students, 1, (int) totalRows, totalRows, 1);
     }
 
     public ExternalStudentListResponse listStudents(UUID tenantId, int page, int pageSize) {

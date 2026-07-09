@@ -26,12 +26,16 @@ export function importExternalStudents({ tenantId, file }) {
   return apiPostForm(`/api/tenants/${encodeURIComponent(tenantId)}/external-students/import`, formData);
 }
 
-export function listExternalStudents({ tenantId, page = 1, pageSize = 25 }) {
-  const params = new URLSearchParams({
-    page: String(page),
-    pageSize: String(pageSize),
-  });
-  return apiGet(`/api/tenants/${encodeURIComponent(tenantId)}/external-students?${params.toString()}`);
+export function listExternalStudents({ tenantId, page, pageSize } = {}) {
+  const params = new URLSearchParams();
+  if (page !== undefined && page !== null) {
+    params.set("page", String(page));
+  }
+  if (pageSize !== undefined && pageSize !== null) {
+    params.set("pageSize", String(pageSize));
+  }
+  const query = params.toString();
+  return apiGet(`/api/tenants/${encodeURIComponent(tenantId)}/external-students${query ? `?${query}` : ""}`);
 }
 
 export function getAuthConfig() {
