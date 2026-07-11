@@ -2697,6 +2697,20 @@ button.calendar-day.is-selected {
 
   .check-in-camera-panel {
     grid-template-columns: 1fr;
+    min-width: 0;
+  }
+
+  .check-in-video-frame {
+    order: 1;
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .check-in-result-panel {
+    order: 2;
+    max-width: none;
+    min-width: 0;
   }
 
   .check-in-launch-panel {
@@ -2704,7 +2718,7 @@ button.calendar-day.is-selected {
   }
 
   .check-in-video-frame {
-    min-height: 260px;
+    min-height: 0;
   }
 
   .site-management-row {

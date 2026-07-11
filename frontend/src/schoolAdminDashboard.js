@@ -348,6 +348,7 @@ let checkInFallbackCanvas = null;
 let checkInFallbackContext = null;
 let checkInScannerMode = "native";
 let checkInAudioContext = null;
+let checkInSpeechUnlocked = false;
 let checkInBarcodeValue = "";
 let checkInLastRawBarcodeValue = "";
 let checkInExternalCheckInSubmitting = false;
@@ -1353,10 +1354,6 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
           <section class="check-in-camera-panel">
             <aside class="check-in-result-panel" aria-live="polite">
-              <div>
-                <span class="check-in-result-label">Barcode value</span>
-                <strong data-check-in-barcode-value>${escapeHtml(checkInBarcodeValue || "Waiting for barcode")}</strong>
-              </div>
               <p class="check-in-result-site">${escapeHtml(currentSite ? `Site: ${currentSite.name}` : "No site selected")}${currentClass ? ` - Class: ${currentClass.name}` : ""}</p>
               <div class="check-in-status-block">
                 <span class="check-in-result-label">Barcode status</span>
@@ -1526,6 +1523,8 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         render();
         return;
       }
+      unlockCheckInAudio();
+      unlockCheckInSpeech();
       checkInFlowStage = "camera";
       render();
     });
@@ -2021,12 +2020,17 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
     checkInSelectionError = "";
     checkInTodayListError = "";
+    const printWindow = window.open("", "schooldays-checkout-print", "width=1100,height=900");
+    const printWindowBlocked = !printWindow;
     if (!checkInTodayListRows.length || checkInTodayListQueryKey !== [selectedClassId, checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone)].join(":")) {
       await loadTodayCheckIns({ force: true });
     }
 
     const rows = [...checkInTodayListRows];
     if (!rows.length) {
+      if (printWindow) {
+        printWindow.close();
+      }
       checkInTodayListError = "No students have checked in for this class today.";
       render();
       return;
@@ -2104,26 +2108,35 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         </html>
       `;
 
-      printFrame = document.createElement("iframe");
-      printFrame.setAttribute("aria-hidden", "true");
-      printFrame.style.position = "fixed";
-      printFrame.style.width = "1px";
-      printFrame.style.height = "1px";
-      printFrame.style.border = "0";
-      printFrame.style.left = "-9999px";
-      printFrame.style.top = "0";
-      printFrame.style.opacity = "0";
-      document.body.appendChild(printFrame);
+      let frameWindow = printWindowBlocked ? null : printWindow;
+      let frameDocument = null;
+      if (frameWindow) {
+        frameDocument = frameWindow.document;
+        frameDocument.open();
+        frameDocument.write(html);
+        frameDocument.close();
+      } else {
+        printFrame = document.createElement("iframe");
+        printFrame.setAttribute("aria-hidden", "true");
+        printFrame.style.position = "fixed";
+        printFrame.style.width = "1px";
+        printFrame.style.height = "1px";
+        printFrame.style.border = "0";
+        printFrame.style.left = "-9999px";
+        printFrame.style.top = "0";
+        printFrame.style.opacity = "0";
+        document.body.appendChild(printFrame);
 
-      const frameWindow = printFrame.contentWindow;
-      const frameDocument = printFrame.contentDocument;
-      if (!frameWindow || !frameDocument) {
-        throw new Error("Check-out sheet could not be prepared for printing.");
+        frameWindow = printFrame.contentWindow;
+        frameDocument = printFrame.contentDocument;
+        if (!frameWindow || !frameDocument) {
+          throw new Error("Check-out sheet could not be prepared for printing.");
+        }
+
+        frameDocument.open();
+        frameDocument.write(html);
+        frameDocument.close();
       }
-
-      frameDocument.open();
-      frameDocument.write(html);
-      frameDocument.close();
 
       await new Promise((resolve, reject) => {
         const finish = async () => {
@@ -2147,7 +2160,11 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         if (frameDocument.readyState === "complete") {
           finish();
         } else {
-          printFrame.addEventListener("load", finish, { once: true });
+          if (printFrame) {
+            printFrame.addEventListener("load", finish, { once: true });
+          } else {
+            frameWindow.addEventListener("load", finish, { once: true });
+          }
         }
       });
 
@@ -2539,29 +2556,21 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   function playCheckInSuccessSound() {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
+    const audioContext = ensureCheckInAudioContext();
+    if (!audioContext) {
       return;
     }
 
-    if (!checkInAudioContext) {
-      checkInAudioContext = new AudioContextClass();
-    }
-
-    if (checkInAudioContext.state === "suspended") {
-      checkInAudioContext.resume().catch(() => {});
-    }
-
-    const now = checkInAudioContext.currentTime;
-    const gain = checkInAudioContext.createGain();
+    const now = audioContext.currentTime;
+    const gain = audioContext.createGain();
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.exponentialRampToValueAtTime(0.24, now + 0.04);
     gain.gain.exponentialRampToValueAtTime(0.18, now + 0.18);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.48);
-    gain.connect(checkInAudioContext.destination);
+    gain.connect(audioContext.destination);
 
     [880, 1175].forEach((frequency, index) => {
-      const oscillator = checkInAudioContext.createOscillator();
+      const oscillator = audioContext.createOscillator();
       oscillator.type = "sine";
       oscillator.frequency.setValueAtTime(frequency, now + index * 0.2);
       oscillator.connect(gain);
@@ -2577,29 +2586,21 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   function playCheckInFailureSound() {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
+    const audioContext = ensureCheckInAudioContext();
+    if (!audioContext) {
       return;
     }
 
-    if (!checkInAudioContext) {
-      checkInAudioContext = new AudioContextClass();
-    }
-
-    if (checkInAudioContext.state === "suspended") {
-      checkInAudioContext.resume().catch(() => {});
-    }
-
-    const now = checkInAudioContext.currentTime;
-    const gain = checkInAudioContext.createGain();
+    const now = audioContext.currentTime;
+    const gain = audioContext.createGain();
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.exponentialRampToValueAtTime(0.3, now + 0.03);
     gain.gain.exponentialRampToValueAtTime(0.22, now + 0.14);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
-    gain.connect(checkInAudioContext.destination);
+    gain.connect(audioContext.destination);
 
     [220, 160].forEach((frequency, index) => {
-      const oscillator = checkInAudioContext.createOscillator();
+      const oscillator = audioContext.createOscillator();
       oscillator.type = "square";
       oscillator.frequency.setValueAtTime(frequency, now + index * 0.16);
       oscillator.connect(gain);
@@ -2612,6 +2613,55 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     window.setTimeout(() => {
       gain.disconnect();
     }, 520);
+  }
+
+  function ensureCheckInAudioContext() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return null;
+    }
+    if (!checkInAudioContext) {
+      checkInAudioContext = new AudioContextClass();
+    }
+    if (checkInAudioContext.state === "suspended") {
+      checkInAudioContext.resume().catch(() => {});
+    }
+    return checkInAudioContext;
+  }
+
+  function unlockCheckInAudio() {
+    const audioContext = ensureCheckInAudioContext();
+    if (!audioContext) {
+      return;
+    }
+    const buffer = audioContext.createBuffer(1, 1, 22050);
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioContext.destination);
+    source.start(0);
+    source.stop(0.001);
+  }
+
+  function unlockCheckInSpeech() {
+    const speechSynthesis = window.speechSynthesis;
+    const SpeechSynthesisUtteranceClass = window.SpeechSynthesisUtterance;
+    if (!speechSynthesis || !SpeechSynthesisUtteranceClass || checkInSpeechUnlocked) {
+      return;
+    }
+
+    try {
+      speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtteranceClass("\u200B");
+      utterance.lang = "en-US";
+      utterance.volume = 0;
+      speechSynthesis.speak(utterance);
+      window.setTimeout(() => {
+        speechSynthesis.cancel();
+      }, 50);
+      checkInSpeechUnlocked = true;
+    } catch (_error) {
+      // Ignore speech priming failures; the visible check-in flow still works.
+    }
   }
 
   function speakCheckInSuccess(name) {
@@ -5502,10 +5552,6 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
           <section class="check-in-camera-panel">
             <aside class="check-in-result-panel" aria-live="polite">
-              <div>
-                <span class="check-in-result-label">Barcode value</span>
-                <strong data-check-in-barcode-value>${escapeHtml(checkInBarcodeValue || "Waiting for barcode")}</strong>
-              </div>
               <p class="check-in-result-site">${escapeHtml(currentClass ? `Class: ${currentClass.name}` : "No class selected")}</p>
               <div class="check-in-status-block">
                 <span class="check-in-result-label">Barcode status</span>
