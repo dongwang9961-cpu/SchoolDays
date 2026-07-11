@@ -2567,7 +2567,7 @@ button.calendar-day.is-selected {
   gap: 18px;
   min-height: 100%;
   width: 100%;
-  max-width: 240px;
+  max-width: 300px;
   padding: 22px;
 }
 
@@ -2594,11 +2594,11 @@ button.calendar-day.is-selected {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(10ch, 1fr) auto;
 }
 
 .check-in-manual-form .text-input {
-  min-width: 0;
+  min-width: 10ch;
 }
 
 .check-in-status-block {

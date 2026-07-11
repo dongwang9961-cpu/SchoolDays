@@ -1916,14 +1916,28 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
           return { displayName, studentId, gender, qrDataUrl };
         }),
       );
+      const cardsPerPage = 6;
+      const cardPages = [];
+      for (let index = 0; index < cards.length; index += cardsPerPage) {
+        cardPages.push(cards.slice(index, index + cardsPerPage));
+      }
 
       const styles = `
         <style>
           @page { size: auto; margin: 12mm; }
           :root { color: #172033; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
           body { margin: 0; padding: 0; }
-          .sheet { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-          .card { border: 1px solid #172033; border-radius: 10px; display: grid; gap: 12px; padding: 14px; break-inside: avoid; }
+          .sheet-page {
+            break-after: page;
+            display: grid;
+            gap: 14px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-rows: repeat(3, minmax(0, 1fr));
+            min-height: calc(100vh - 24mm);
+            page-break-after: always;
+          }
+          .sheet-page:last-child { break-after: auto; page-break-after: auto; }
+          .card { border: 1px solid #172033; border-radius: 10px; display: grid; gap: 12px; padding: 14px; break-inside: avoid; page-break-inside: avoid; }
           .title { font-size: 1.1rem; font-weight: 900; margin: 0; }
           .details { display: grid; gap: 6px; }
           .detail { font-size: 0.95rem; line-height: 1.35; }
@@ -1941,22 +1955,26 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
             ${styles}
           </head>
           <body>
-            <div class="sheet">
-              ${cards
-                .map(
-                  (card) => `
-                    <section class="card">
-                      <h1 class="title">${escapeHtml(card.displayName)}</h1>
-                      <div class="details">
-                        <div class="detail"><strong>Student ID</strong> ${escapeHtml(card.studentId || "-")}</div>
-                        <div class="detail"><strong>Gender</strong> ${escapeHtml(card.gender || "-")}</div>
-                      </div>
-                      <div class="qr"><img alt="QR code for ${escapeHtml(card.displayName)}" src="${card.qrDataUrl}" /></div>
-                    </section>
-                  `,
-                )
-                .join("")}
-            </div>
+            ${cardPages
+              .map((pageCards, pageIndex) => `
+                <div class="sheet-page">
+                  ${pageCards
+                    .map(
+                      (card) => `
+                        <section class="card">
+                          <h1 class="title">${escapeHtml(card.displayName)}</h1>
+                          <div class="details">
+                            <div class="detail"><strong>Student ID</strong> ${escapeHtml(card.studentId || "-")}</div>
+                            <div class="detail"><strong>Gender</strong> ${escapeHtml(card.gender || "-")}</div>
+                          </div>
+                          <div class="qr"><img alt="QR code for ${escapeHtml(card.displayName)}" src="${card.qrDataUrl}" /></div>
+                        </section>
+                      `,
+                    )
+                    .join("")}
+                </div>
+              `)
+              .join("")}
           </body>
         </html>
       `;
