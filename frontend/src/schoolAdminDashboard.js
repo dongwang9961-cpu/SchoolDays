@@ -9,6 +9,7 @@ import { getClassPricing, getTenantClassPricing, saveClassPricing } from "./api/
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
 import { createSite, listSites, updateSite } from "./api/sites.js";
 import { listStudents } from "./api/students.js";
+import jsQR from "jsqr";
 import QRCode from "qrcode";
 import {
   listNotificationHistory,
@@ -343,6 +344,9 @@ let checkInScannerStarting = false;
 let checkInScanning = false;
 let checkInScannerTimer = null;
 let checkInDetector = null;
+let checkInFallbackCanvas = null;
+let checkInFallbackContext = null;
+let checkInScannerMode = "native";
 let checkInAudioContext = null;
 let checkInBarcodeValue = "";
 let checkInLastRawBarcodeValue = "";
@@ -2371,20 +2375,21 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       checkInScannerStarting = false;
     }
 
-    if (!("BarcodeDetector" in window)) {
-      updateCheckInStatus("Barcode detection is not supported in this browser.", true);
-      return;
-    }
-
-    try {
-      checkInDetector = await createCheckInBarcodeDetector();
-    } catch (detectorError) {
-      updateCheckInStatus("Barcode detector could not be started in this browser.", true);
-      return;
+    if ("BarcodeDetector" in window) {
+      try {
+        checkInDetector = await createCheckInBarcodeDetector();
+        checkInScannerMode = "native";
+      } catch (detectorError) {
+        checkInDetector = null;
+        checkInScannerMode = "fallback";
+      }
+    } else {
+      checkInDetector = null;
+      checkInScannerMode = "fallback";
     }
 
     checkInScanning = true;
-    updateCheckInStatus("Scanning for barcodes...");
+    updateCheckInStatus(checkInScannerMode === "fallback" ? "Scanning for QR codes..." : "Scanning for barcodes...");
     scheduleCheckInScan();
   }
 
@@ -2436,7 +2441,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   async function scanCheckInFrame() {
-    if (!checkInScanning || !checkInDetector) {
+    if (!checkInScanning) {
       return;
     }
 
@@ -2447,12 +2452,20 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     }
 
     try {
-      const barcodes = await checkInDetector.detect(video);
-      const barcode = barcodes[0] || null;
-      const value = barcode?.rawValue || "";
+      let value = "";
+      let format = "";
+      if (checkInDetector) {
+        const barcodes = await checkInDetector.detect(video);
+        const barcode = barcodes[0] || null;
+        value = barcode?.rawValue || "";
+        format = barcode?.format || "";
+      } else {
+        value = detectQrFromVideoFrame(video);
+        format = value ? "qr_code" : "";
+      }
       if (value && value !== checkInLastRawBarcodeValue) {
         checkInLastRawBarcodeValue = value;
-        if (barcode?.format === "qr_code") {
+        if (format === "qr_code" || checkInScannerMode === "fallback") {
           await handleExternalStudentQrScan(value);
         } else {
           checkInBarcodeValue = value;
@@ -2460,7 +2473,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
           updateCheckInStatus("Barcode detected.");
         }
       } else if (!checkInLastRawBarcodeValue) {
-        updateCheckInStatus("Scanning for barcodes...");
+        updateCheckInStatus(checkInScannerMode === "fallback" ? "Scanning for QR codes..." : "Scanning for barcodes...");
       }
     } catch (scanError) {
       updateCheckInStatus("Barcode scanner could not read the camera frame.", true);
@@ -2486,6 +2499,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     checkInScanning = false;
     checkInScannerStarting = false;
     checkInDetector = null;
+    checkInScannerMode = "native";
+    checkInFallbackCanvas = null;
+    checkInFallbackContext = null;
     checkInExternalCheckInSubmitting = false;
     if (checkInScannerTimer) {
       clearTimeout(checkInScannerTimer);
@@ -2499,6 +2515,27 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     if (video) {
       video.srcObject = null;
     }
+  }
+
+  function detectQrFromVideoFrame(video) {
+    const width = video.videoWidth || video.clientWidth;
+    const height = video.videoHeight || video.clientHeight;
+    if (!width || !height) {
+      return "";
+    }
+    if (!checkInFallbackCanvas) {
+      checkInFallbackCanvas = document.createElement("canvas");
+      checkInFallbackContext = checkInFallbackCanvas.getContext("2d", { willReadFrequently: true });
+    }
+    if (!checkInFallbackCanvas || !checkInFallbackContext) {
+      return "";
+    }
+    checkInFallbackCanvas.width = width;
+    checkInFallbackCanvas.height = height;
+    checkInFallbackContext.drawImage(video, 0, 0, width, height);
+    const imageData = checkInFallbackContext.getImageData(0, 0, width, height);
+    const code = jsQR(imageData.data, width, height, { inversionAttempts: "attemptBoth" });
+    return code?.data || "";
   }
 
   function playCheckInSuccessSound() {
