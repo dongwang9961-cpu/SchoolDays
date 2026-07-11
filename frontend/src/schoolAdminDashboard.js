@@ -1372,7 +1372,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                     placeholder="Student ID"
                     value="${escapeHtml(checkInManualStudentId)}"
                   >
-                  <button type="button" class="secondary-button compact-button" data-check-in-manual-submit>Check in</button>
+                  <button type="submit" class="secondary-button compact-button" data-check-in-manual-submit>Submit</button>
                 </form>
               </div>
               <div class="check-in-status-block">
@@ -1390,6 +1390,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     `;
 
     root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    bindManualCheckInForm();
     startCheckInScanner();
   }
 
@@ -1555,11 +1556,6 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       updateCheckInImportFileLabel();
     });
     root.querySelector("[data-check-in-import-form]")?.addEventListener("submit", handleCheckInImportSubmit);
-    root.querySelector("[data-check-in-manual-form]")?.addEventListener("submit", handleManualCheckInSubmit);
-    root.querySelector("[data-check-in-manual-submit]")?.addEventListener("click", handleManualCheckInSubmit);
-    root.querySelector("[data-check-in-manual-input]")?.addEventListener("input", (event) => {
-      checkInManualStudentId = event.currentTarget.value;
-    });
     root.querySelector("[data-check-in-students-modal]")?.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) {
         closeCheckInStudentsModal();
@@ -2800,54 +2796,16 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       return;
     }
 
-    checkInBarcodeValue = formatExternalStudentBarcode(payload);
-    updateCheckInBarcodeValue(checkInBarcodeValue);
-
-    if (!selectedClassId) {
-      updateCheckInStatus(role === "TEACHER"
-        ? "Select a class before checking in external students."
-        : "Select a site and class before checking in external students.", true);
-      return;
-    }
-    if (checkInExternalCheckInSubmitting) {
-      return;
-    }
-
-    checkInExternalCheckInSubmitting = true;
-    updateCheckInStatus("Saving external check-in...");
-
-    try {
-      const site = selectedSite();
-      const response = await checkInExternalStudent({
-        tenantId: school.tenantId,
-        externalStudentId: payload.studentId,
-        classId: selectedClassId,
-        checkDate: formatLocalDateForTimezone(new Date(), site?.timezone),
-        studentName: payload.name || null,
-        gender: payload.gender || null,
-        barcodeValue: rawValue,
-      });
-      const confirmation = formatExternalStudentBarcode(payload) || response.externalStudentId;
-      updateCheckInBarcodeValue(confirmation);
-      updateCheckInStatus(`Checked in ${confirmation}.`);
-      playCheckInSuccessSound();
-      speakCheckInSuccess(confirmation);
-      await loadTodayCheckIns({ force: true });
-    } catch (checkInError) {
-      const message = checkInError instanceof Error && checkInError.status === 409
-        ? "This student has already checked in."
-        : checkInError instanceof Error
-          ? checkInError.message
-          : "External check-in could not be saved.";
-      playCheckInFailureSound();
-      updateCheckInStatus(message, true);
-    } finally {
-      checkInExternalCheckInSubmitting = false;
-    }
+    await submitExternalStudentCheckIn({
+      externalStudentId: payload.studentId,
+      displayValue: formatExternalStudentBarcode(payload),
+      studentName: payload.name || null,
+      gender: payload.gender || null,
+      barcodeValue: rawValue,
+    });
   }
 
-  async function handleManualCheckInSubmit(event) {
-    event.preventDefault();
+  async function handleManualCheckInSubmit() {
     const manualInput = root.querySelector("[data-check-in-manual-input]");
     const studentId = String((manualInput && "value" in manualInput ? manualInput.value : checkInManualStudentId) || "").trim();
     checkInManualStudentId = studentId;
@@ -2866,29 +2824,88 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     }
 
     const matchedStudent = checkInStudents.find((student) => String(student.externalId || "").trim() === studentId) || null;
+    await submitExternalStudentCheckIn({
+      externalStudentId: studentId,
+      displayValue: matchedStudent?.studentName
+        ? formatExternalStudentBarcode({
+          studentId,
+          name: matchedStudent.studentName,
+        })
+        : studentId,
+      studentName: matchedStudent?.studentName || null,
+      gender: matchedStudent?.genderCode || null,
+      barcodeValue: studentId,
+      clearManualInput: true,
+      manualInput,
+    });
+  }
+
+  function bindManualCheckInForm() {
+    const form = root.querySelector("[data-check-in-manual-form]");
+    const input = root.querySelector("[data-check-in-manual-input]");
+    if (!form || !input) {
+      return;
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void handleManualCheckInSubmit();
+    });
+    input.addEventListener("input", (event) => {
+      checkInManualStudentId = event.currentTarget.value;
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+      } else {
+        void handleManualCheckInSubmit();
+      }
+    });
+  }
+
+  async function submitExternalStudentCheckIn({
+    externalStudentId,
+    displayValue,
+    studentName,
+    gender,
+    barcodeValue,
+    clearManualInput = false,
+    manualInput = null,
+  }) {
+    if (!selectedClassId) {
+      updateCheckInStatus(role === "TEACHER"
+        ? "Select a class before checking in external students."
+        : "Select a site and class before checking in external students.", true);
+      return;
+    }
+    if (checkInExternalCheckInSubmitting) {
+      return;
+    }
+
     checkInExternalCheckInSubmitting = true;
-    updateCheckInStatus("Saving manual check-in...");
+    updateCheckInStatus("Saving external check-in...");
 
     try {
       const site = selectedSite();
       const response = await checkInExternalStudent({
         tenantId: school.tenantId,
-        externalStudentId: studentId,
+        externalStudentId,
         classId: selectedClassId,
         checkDate: formatLocalDateForTimezone(new Date(), site?.timezone),
-        studentName: matchedStudent?.studentName || null,
-        gender: matchedStudent?.genderCode || null,
-        barcodeValue: studentId,
+        studentName: studentName || null,
+        gender: gender || null,
+        barcodeValue: barcodeValue || externalStudentId,
       });
-      const confirmation = matchedStudent?.studentName
-        ? formatExternalStudentBarcode({
-          studentId,
-          name: matchedStudent.studentName,
-        })
-        : response.externalStudentId;
-      checkInManualStudentId = "";
-      if (manualInput && "value" in manualInput) {
-        manualInput.value = "";
+      const confirmation = displayValue || response.externalStudentId;
+      if (clearManualInput) {
+        checkInManualStudentId = "";
+        if (manualInput && "value" in manualInput) {
+          manualInput.value = "";
+        }
       }
       updateCheckInBarcodeValue(confirmation);
       updateCheckInStatus(`Checked in ${confirmation}.`);
@@ -5656,7 +5673,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                     placeholder="Student ID"
                     value="${escapeHtml(checkInManualStudentId)}"
                   >
-                  <button type="button" class="secondary-button compact-button" data-check-in-manual-submit>Check in</button>
+                  <button type="submit" class="secondary-button compact-button" data-check-in-manual-submit>Submit</button>
                 </form>
               </div>
               <div class="check-in-status-block">
@@ -5686,6 +5703,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         closeTodayCheckInsModal();
       }
     });
+    bindManualCheckInForm();
     startCheckInScanner();
   }
 
