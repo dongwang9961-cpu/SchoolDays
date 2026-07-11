@@ -1430,6 +1430,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
               <div class="check-in-launch-actions">
                 <button class="check-in-launch-button" data-check-in-start type="button" ${!selectedSiteId || !selectedClassId || !classIsScheduledToday ? "disabled" : ""}>Check In</button>
                 <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedSiteId || !selectedClassId ? "disabled" : ""}>Today's check-in list</button>
+                <button class="secondary-button compact-button" data-check-in-print-sheet type="button" ${!selectedSiteId || !selectedClassId ? "disabled" : ""}>Print check-out sheet</button>
               </div>
             </div>
 
@@ -1525,6 +1526,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       render();
     });
     root.querySelector("[data-check-in-today-list]")?.addEventListener("click", handleShowTodayCheckIns);
+    root.querySelector("[data-check-in-print-sheet]")?.addEventListener("click", handlePrintCheckOutSheet);
     root.querySelector("[data-check-in-show-all]")?.addEventListener("click", handleShowCheckInStudents);
     root.querySelector("[data-check-in-import-file]")?.addEventListener("change", (event) => {
       checkInImportFile = event.currentTarget.files?.[0] || null;
@@ -2001,6 +2003,156 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       checkInStudentsMessage = "";
       checkInStudentsError = printError instanceof Error ? printError.message : "Student cards could not be printed.";
     } finally {
+      render();
+    }
+  }
+
+  async function handlePrintCheckOutSheet() {
+    const classRecord = selectedClass();
+    if (!classRecord || !selectedClassId) {
+      checkInSelectionError = "Select a class before printing the check-out sheet.";
+      render();
+      return;
+    }
+
+    checkInSelectionError = "";
+    checkInTodayListError = "";
+    if (!checkInTodayListRows.length || checkInTodayListQueryKey !== [selectedClassId, checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone)].join(":")) {
+      await loadTodayCheckIns({ force: true });
+    }
+
+    const rows = [...checkInTodayListRows];
+    if (!rows.length) {
+      checkInTodayListError = "No students have checked in for this class today.";
+      render();
+      return;
+    }
+
+    const classDate = checkInTodayListDate || formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
+    const siteName = selectedSite()?.name || "";
+    const className = classRecord.name || "Selected class";
+    const sheetRows = rows.map((row, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(row.studentName || "-")}</td>
+        <td>${escapeHtml(row.externalStudentId || "-")}</td>
+        <td>${escapeHtml(row.gender || "-")}</td>
+        <td>${escapeHtml(formatCheckInTime(row.checkInTime))}</td>
+        <td><span class="signature-line"></span></td>
+      </tr>
+    `).join("");
+
+    let printFrame;
+    try {
+      const html = `
+        <!doctype html>
+        <html>
+          <head>
+            <title>Check-out sheet</title>
+            <style>
+              @page { size: auto; margin: 12mm; }
+              :root { color: #172033; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+              body { margin: 0; padding: 0; }
+              .sheet { display: grid; gap: 14px; }
+              .header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
+              .title { font-size: 1.35rem; font-weight: 900; margin: 0 0 6px; }
+              .meta { display: grid; gap: 4px; font-size: 0.95rem; }
+              .meta strong { font-weight: 800; }
+              table { border-collapse: collapse; width: 100%; }
+              th, td { border: 1px solid #172033; padding: 8px 10px; text-align: left; vertical-align: top; }
+              th { background: #f4f7fb; font-size: 0.88rem; }
+              td { font-size: 0.94rem; }
+              .signature-cell { width: 24%; }
+              .signature-line { border-bottom: 1px solid #172033; display: block; height: 18px; width: 100%; }
+              .note { font-size: 0.84rem; margin: 0; }
+            </style>
+          </head>
+          <body>
+            <div class="sheet">
+              <div class="header">
+                <div>
+                  <h1 class="title">${escapeHtml(school.name)} check-out sheet</h1>
+                  <div class="meta">
+                    <div><strong>Site:</strong> ${escapeHtml(siteName || "All sites")}</div>
+                    <div><strong>Class:</strong> ${escapeHtml(className)}</div>
+                    <div><strong>Date:</strong> ${escapeHtml(classDate)}</div>
+                  </div>
+                </div>
+                <p class="note">Parents sign on the right after pickup.</p>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Student</th>
+                    <th>ID</th>
+                    <th>Gender</th>
+                    <th>Check-in time</th>
+                    <th class="signature-cell">Parent signature</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${sheetRows}
+                </tbody>
+              </table>
+            </div>
+          </body>
+        </html>
+      `;
+
+      printFrame = document.createElement("iframe");
+      printFrame.setAttribute("aria-hidden", "true");
+      printFrame.style.position = "fixed";
+      printFrame.style.width = "1px";
+      printFrame.style.height = "1px";
+      printFrame.style.border = "0";
+      printFrame.style.left = "-9999px";
+      printFrame.style.top = "0";
+      printFrame.style.opacity = "0";
+      document.body.appendChild(printFrame);
+
+      const frameWindow = printFrame.contentWindow;
+      const frameDocument = printFrame.contentDocument;
+      if (!frameWindow || !frameDocument) {
+        throw new Error("Check-out sheet could not be prepared for printing.");
+      }
+
+      frameDocument.open();
+      frameDocument.write(html);
+      frameDocument.close();
+
+      await new Promise((resolve, reject) => {
+        const finish = async () => {
+          try {
+            await new Promise((animationResolve) => frameWindow.requestAnimationFrame(() => frameWindow.requestAnimationFrame(animationResolve)));
+            const cleanup = () => {
+              frameWindow.removeEventListener("afterprint", cleanup);
+              if (printFrame && printFrame.parentNode) {
+                printFrame.parentNode.removeChild(printFrame);
+              }
+            };
+            frameWindow.addEventListener("afterprint", cleanup, { once: true });
+            frameWindow.focus();
+            frameWindow.print();
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        };
+
+        if (frameDocument.readyState === "complete") {
+          finish();
+        } else {
+          printFrame.addEventListener("load", finish, { once: true });
+        }
+      });
+
+      checkInTodayListMessage = `${rows.length} student${rows.length === 1 ? "" : "s"} ready for parent sign-out.`;
+      checkInTodayListError = "";
+      render();
+    } catch (printError) {
+      checkInTodayListMessage = "";
+      checkInTodayListError = printError instanceof Error ? printError.message : "Check-out sheet could not be printed.";
       render();
     }
   }
@@ -5237,9 +5389,10 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                 ${checkInSelectionError ? `<p class="message error" role="alert">${escapeHtml(checkInSelectionError)}</p>` : ""}
                 <p class="check-in-today-count">${escapeHtml(renderTodayCheckInCountText())}</p>
                 ${selectedClassRecord && !classIsScheduledToday ? `<p class="message error" role="alert">No class is scheduled today for the selected class.</p>` : ""}
-                <div class="check-in-launch-actions">
+              <div class="check-in-launch-actions">
                   <button class="check-in-launch-button" data-teacher-check-in-start type="button" ${!selectedClassId || !classIsScheduledToday ? "disabled" : ""}>Check In</button>
                   <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedClassId ? "disabled" : ""}>Today's check-in list</button>
+                  <button class="secondary-button compact-button" data-check-in-print-sheet type="button" ${!selectedClassId ? "disabled" : ""}>Print check-out sheet</button>
                 </div>
               </div>
             </section>
@@ -5285,6 +5438,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       render();
     });
     root.querySelector("[data-check-in-today-list]")?.addEventListener("click", handleShowTodayCheckIns);
+    root.querySelector("[data-check-in-print-sheet]")?.addEventListener("click", handlePrintCheckOutSheet);
     root.querySelector("[data-check-in-today-list-close]")?.addEventListener("click", closeTodayCheckInsModal);
     root.querySelector("[data-check-in-today-list-modal]")?.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) {

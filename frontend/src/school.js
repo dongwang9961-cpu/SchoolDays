@@ -4,6 +4,7 @@ import { getCurrentAuthUser } from "./api/auth.js";
 import { ApiError } from "./api/client.js";
 import { getPublicSchool } from "./api/schools.js";
 import { renderSchoolDashboard } from "./schoolAdminDashboard.js";
+import QRCode from "qrcode";
 import "./styles.css";
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -14,6 +15,7 @@ const schoolLookup = schoolSlug ? await loadSchool(schoolSlug) : { school: null,
 const school = schoolLookup.school;
 const schoolLoadError = schoolSlug && !school;
 const initialMode = getInitialMode();
+const portalQrMarkup = school ? await portalQrCodeMarkup() : "";
 const currentAuth = school ? await loadExistingSession() : null;
 
 if (currentAuth) {
@@ -23,7 +25,7 @@ if (currentAuth) {
     brandEyebrow: school ? school.name : "SchoolDays",
     brandTitle: school ? "Access your school account" : "School website",
     brandDescription: brandDescription(),
-    contextMarkup: schoolContextMarkup(),
+    contextMarkup: schoolContextMarkup(portalQrMarkup),
     allowGoogleLogin: Boolean(school && schoolRoute.portal === "parent" && !urlParams.get("token")),
     initialMode,
     modes: modeOptions(),
@@ -142,14 +144,37 @@ function brandDescription() {
   return "Open a school URL like /school/longlong-art-studio to access that school website.";
 }
 
-function schoolContextMarkup() {
+function schoolContextMarkup(portalQrMarkup = "") {
   if (school) {
-    return contextNote(`${portalLabel()} portal: <strong>${escapeHtml(school.slug)}</strong>`);
+    return `
+      ${contextNote(`${portalLabel()} portal: <strong>${escapeHtml(school.slug)}</strong>`)}
+      ${portalQrMarkup}
+    `;
   }
   if (schoolLoadError) {
     return contextError(schoolLookupErrorText());
   }
   return contextError("School is missing from the URL.");
+}
+
+async function portalQrCodeMarkup() {
+  const portalUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+  const qrDataUrl = await QRCode.toDataURL(portalUrl, {
+    errorCorrectionLevel: "M",
+    margin: 1,
+    width: 220,
+  });
+  return `
+    <section class="portal-qr-panel" aria-label="Portal QR code">
+      <div class="portal-qr-copy">
+        <strong>Scan to open this portal</strong>
+        <span>${escapeHtml(portalLabel())} access on a phone</span>
+      </div>
+      <div class="portal-qr-code">
+        <img alt="${escapeHtml(portalLabel())} portal QR code" src="${qrDataUrl}" />
+      </div>
+    </section>
+  `;
 }
 
 function portalLabel() {

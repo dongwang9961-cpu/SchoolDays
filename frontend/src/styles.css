@@ -112,6 +112,48 @@ h1 {
   padding: 11px 13px;
 }
 
+.portal-qr-panel {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  margin: 0 0 18px;
+  padding: 14px;
+}
+
+.portal-qr-copy {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  text-align: center;
+}
+
+.portal-qr-copy strong {
+  color: #172033;
+  font-size: 0.98rem;
+}
+
+.portal-qr-copy span {
+  color: #5f6f86;
+  font-size: 0.88rem;
+}
+
+.portal-qr-code {
+  background: #ffffff;
+  border: 1px solid #c7cedd;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.portal-qr-code img {
+  display: block;
+  height: 220px;
+  width: 220px;
+}
+
 .form-heading {
   margin-bottom: 6px;
 }
