@@ -2590,6 +2590,17 @@ button.calendar-day.is-selected {
   gap: 10px;
 }
 
+.check-in-manual-form {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.check-in-manual-form .text-input {
+  min-width: 0;
+}
+
 .check-in-status-block {
   display: grid;
   gap: 10px;
@@ -2711,6 +2722,10 @@ button.calendar-day.is-selected {
     order: 2;
     max-width: none;
     min-width: 0;
+  }
+
+  .check-in-manual-form {
+    grid-template-columns: 1fr;
   }
 
   .check-in-launch-panel {

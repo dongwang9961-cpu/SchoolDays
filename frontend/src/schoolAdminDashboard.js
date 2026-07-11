@@ -350,6 +350,7 @@ let checkInScannerMode = "native";
 let checkInAudioContext = null;
 let checkInSpeechUnlocked = false;
 let checkInBarcodeValue = "";
+let checkInManualStudentId = "";
 let checkInLastRawBarcodeValue = "";
 let checkInExternalCheckInSubmitting = false;
 let checkInScannerStatus = "Starting camera...";
@@ -1360,6 +1361,21 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                 <p class="check-in-status" data-check-in-status>${escapeHtml(checkInScannerStatus)}</p>
               </div>
               <div class="check-in-status-block">
+                <span class="check-in-result-label">Manual check-in</span>
+                <form class="check-in-manual-form" data-check-in-manual-form novalidate>
+                  <input
+                    class="text-input"
+                    data-check-in-manual-input
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    placeholder="Student ID"
+                    value="${escapeHtml(checkInManualStudentId)}"
+                  >
+                  <button type="button" class="secondary-button compact-button" data-check-in-manual-submit>Check in</button>
+                </form>
+              </div>
+              <div class="check-in-status-block">
                 <span class="check-in-result-label">Today's check-ins</span>
                 <p class="check-in-status">${escapeHtml(renderTodayCheckInCountText())}</p>
               </div>
@@ -1523,6 +1539,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         render();
         return;
       }
+      checkInManualStudentId = "";
       unlockCheckInAudio();
       unlockCheckInSpeech();
       checkInFlowStage = "camera";
@@ -1538,6 +1555,11 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       updateCheckInImportFileLabel();
     });
     root.querySelector("[data-check-in-import-form]")?.addEventListener("submit", handleCheckInImportSubmit);
+    root.querySelector("[data-check-in-manual-form]")?.addEventListener("submit", handleManualCheckInSubmit);
+    root.querySelector("[data-check-in-manual-submit]")?.addEventListener("click", handleManualCheckInSubmit);
+    root.querySelector("[data-check-in-manual-input]")?.addEventListener("input", (event) => {
+      checkInManualStudentId = event.currentTarget.value;
+    });
     root.querySelector("[data-check-in-students-modal]")?.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) {
         closeCheckInStudentsModal();
@@ -2806,6 +2828,68 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         barcodeValue: rawValue,
       });
       const confirmation = formatExternalStudentBarcode(payload) || response.externalStudentId;
+      updateCheckInBarcodeValue(confirmation);
+      updateCheckInStatus(`Checked in ${confirmation}.`);
+      playCheckInSuccessSound();
+      speakCheckInSuccess(confirmation);
+      await loadTodayCheckIns({ force: true });
+    } catch (checkInError) {
+      const message = checkInError instanceof Error && checkInError.status === 409
+        ? "This student has already checked in."
+        : checkInError instanceof Error
+          ? checkInError.message
+          : "External check-in could not be saved.";
+      playCheckInFailureSound();
+      updateCheckInStatus(message, true);
+    } finally {
+      checkInExternalCheckInSubmitting = false;
+    }
+  }
+
+  async function handleManualCheckInSubmit(event) {
+    event.preventDefault();
+    const manualInput = root.querySelector("[data-check-in-manual-input]");
+    const studentId = String((manualInput && "value" in manualInput ? manualInput.value : checkInManualStudentId) || "").trim();
+    checkInManualStudentId = studentId;
+    if (!studentId) {
+      updateCheckInStatus("Enter a student ID.", true);
+      return;
+    }
+    if (!selectedClassId) {
+      updateCheckInStatus(role === "TEACHER"
+        ? "Select a class before checking in external students."
+        : "Select a site and class before checking in external students.", true);
+      return;
+    }
+    if (checkInExternalCheckInSubmitting) {
+      return;
+    }
+
+    const matchedStudent = checkInStudents.find((student) => String(student.externalId || "").trim() === studentId) || null;
+    checkInExternalCheckInSubmitting = true;
+    updateCheckInStatus("Saving manual check-in...");
+
+    try {
+      const site = selectedSite();
+      const response = await checkInExternalStudent({
+        tenantId: school.tenantId,
+        externalStudentId: studentId,
+        classId: selectedClassId,
+        checkDate: formatLocalDateForTimezone(new Date(), site?.timezone),
+        studentName: matchedStudent?.studentName || null,
+        gender: matchedStudent?.genderCode || null,
+        barcodeValue: studentId,
+      });
+      const confirmation = matchedStudent?.studentName
+        ? formatExternalStudentBarcode({
+          studentId,
+          name: matchedStudent.studentName,
+        })
+        : response.externalStudentId;
+      checkInManualStudentId = "";
+      if (manualInput && "value" in manualInput) {
+        manualInput.value = "";
+      }
       updateCheckInBarcodeValue(confirmation);
       updateCheckInStatus(`Checked in ${confirmation}.`);
       playCheckInSuccessSound();
@@ -5547,7 +5631,10 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                 ${escapeHtml(currentClass ? currentClass.name : "Choose a class")}
               </p>
             </div>
-            <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+            <div class="header-actions">
+              <button class="secondary-button compact-button" data-teacher-check-in-back type="button">Back</button>
+              <button class="secondary-button compact-button" data-logout type="button">Sign out</button>
+            </div>
           </header>
 
           <section class="check-in-camera-panel">
@@ -5556,6 +5643,21 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
               <div class="check-in-status-block">
                 <span class="check-in-result-label">Barcode status</span>
                 <p class="check-in-status" data-check-in-status>${escapeHtml(checkInScannerStatus)}</p>
+              </div>
+              <div class="check-in-status-block">
+                <span class="check-in-result-label">Manual check-in</span>
+                <form class="check-in-manual-form" data-check-in-manual-form novalidate>
+                  <input
+                    class="text-input"
+                    data-check-in-manual-input
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    placeholder="Student ID"
+                    value="${escapeHtml(checkInManualStudentId)}"
+                  >
+                  <button type="button" class="secondary-button compact-button" data-check-in-manual-submit>Check in</button>
+                </form>
               </div>
               <div class="check-in-status-block">
                 <span class="check-in-result-label">Today's check-ins</span>
@@ -5572,6 +5674,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     `;
 
     root.querySelector("[data-logout]").addEventListener("click", handleLogout);
+    root.querySelector("[data-teacher-check-in-back]")?.addEventListener("click", () => {
+      checkInFlowStage = "intro";
+      checkInManualStudentId = "";
+      checkInScannerStatus = "Starting camera...";
+      render();
+    });
     root.querySelector("[data-check-in-today-list-close]")?.addEventListener("click", closeTodayCheckInsModal);
     root.querySelector("[data-check-in-today-list-modal]")?.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) {
