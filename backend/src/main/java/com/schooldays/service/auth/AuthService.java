@@ -31,6 +31,7 @@ import com.schooldays.dao.auth.UserIdentityDao;
 import com.schooldays.dto.auth.AuthConfigResponse;
 import com.schooldays.dto.auth.AuthResponse;
 import com.schooldays.dto.auth.AuthenticatedUserResponse;
+import com.schooldays.dto.auth.CompletePasswordResetRequest;
 import com.schooldays.dto.auth.CompleteRegistrationRequest;
 import com.schooldays.dto.auth.GoogleCallbackResult;
 import com.schooldays.dto.auth.GoogleStartResponse;
@@ -197,6 +198,9 @@ public class AuthService {
 
         RegistrationLinkRow link = registrationLinkDao.findPendingByTokenHash(tokenHash, now)
                 .orElseThrow(() -> new InvalidAuthRequestException("Registration link is invalid or expired"));
+        if ("password_reset".equals(link.invitationType())) {
+            throw new InvalidAuthRequestException("Password reset links must be used from the password reset form");
+        }
 
         String email = EmailNormalizer.normalize(link.email());
         if (request.email() != null && !request.email().isBlank()
@@ -224,6 +228,36 @@ public class AuthService {
         registrationLinkDao.markUsed(link.id(), now);
 
         AuthenticatedUser principal = userDetailsService.loadById(userId);
+        return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
+    }
+
+    @Transactional
+    public AuthResponse completePasswordReset(CompletePasswordResetRequest request) {
+        String tokenHash = TokenHasher.sha256(request.token());
+        OffsetDateTime now = OffsetDateTime.now();
+
+        RegistrationLinkRow link = registrationLinkDao.findPendingByTokenHash(tokenHash, now)
+                .orElseThrow(() -> new InvalidAuthRequestException("Password reset link is invalid or expired"));
+        if (!"password_reset".equals(link.invitationType())) {
+            throw new InvalidAuthRequestException("This link is not a password reset link");
+        }
+
+        String email = EmailNormalizer.normalize(link.email());
+        UserAuthRow user = userDao.findAuthUserByEmail(email)
+                .orElseThrow(() -> new InvalidAuthRequestException("User was not found"));
+        if (!roleDao.hasTenantRole(user.id(), link.tenantId(), link.intendedRole())) {
+            throw new InvalidAuthRequestException("Password reset link does not match this user's school role");
+        }
+
+        dsl.update(USERS)
+                .set(USERS.PASSWORD_HASH, passwordEncoder.encode(request.password()))
+                .set(USERS.STATUS, "active")
+                .set(USERS.UPDATED_AT, now)
+                .where(USERS.ID.eq(user.id()))
+                .execute();
+        registrationLinkDao.markUsed(link.id(), now);
+
+        AuthenticatedUser principal = userDetailsService.loadById(user.id());
         return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
     }
 
@@ -357,6 +391,32 @@ public class AuthService {
 
         List<InviteUserResultResponse> results = emails.stream()
                 .map(email -> inviteUser(tenantId, invitedByUserId, school, role, request.classId(), email))
+                .toList();
+        return new InviteUserResponse("success", results);
+    }
+
+    @Transactional
+    public InviteUserResponse sendPasswordResetLinks(UUID tenantId, UUID requestedByUserId, InviteUserRequest request) {
+        String role = normalizeRole(request.role());
+        List<String> emails = request.emails() == null ? List.of() : request.emails();
+        if (!roleDao.hasTenantRole(requestedByUserId, tenantId, "SCHOOL_ADMIN")) {
+            throw new InvalidAuthRequestException("Only school administrators can send password reset links");
+        }
+        if (!Set.of("SCHOOL_ADMIN", "TEACHER").contains(role)) {
+            throw new InvalidAuthRequestException("Password reset links can only be sent for school administrators or teachers");
+        }
+        if (emails.isEmpty()) {
+            throw new InvalidAuthRequestException("At least one email address is required");
+        }
+        if (emails.size() > 5) {
+            throw new InvalidAuthRequestException("Password reset links are limited to 5 email addresses per request");
+        }
+
+        PublicSchoolResponse school = tenantDao.findActivePublicSchoolById(tenantId)
+                .orElseThrow(() -> new InvalidAuthRequestException("School not found"));
+
+        List<InviteUserResultResponse> results = emails.stream()
+                .map(email -> sendPasswordResetLink(tenantId, school, role, email))
                 .toList();
         return new InviteUserResponse("success", results);
     }
@@ -611,6 +671,62 @@ public class AuthService {
         );
     }
 
+    private InviteUserResultResponse sendPasswordResetLink(
+            UUID tenantId,
+            PublicSchoolResponse school,
+            String role,
+            String rawEmail
+    ) {
+        String email = EmailNormalizer.normalize(rawEmail);
+        UserAuthRow user = userDao.findAuthUserByEmail(email).orElse(null);
+        if (user == null) {
+            return new InviteUserResultResponse(
+                    email,
+                    role,
+                    "not_found",
+                    "No active account was found for this email address."
+            );
+        }
+        if (!"active".equals(user.status())) {
+            return new InviteUserResultResponse(
+                    email,
+                    role,
+                    "inactive",
+                    "This account is not active."
+            );
+        }
+        if (!roleDao.hasTenantRole(user.id(), tenantId, role)) {
+            return new InviteUserResultResponse(
+                    email,
+                    role,
+                    "role_mismatch",
+                    "This user does not have the selected role at this school."
+            );
+        }
+
+        String token = tokenGenerator.newToken();
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime expiresAt = now.plusHours(REGISTRATION_LINK_TTL_HOURS);
+        RegistrationLinkRow link = registrationLinkDao.create(
+                tenantId,
+                email,
+                role,
+                "password_reset",
+                null,
+                TokenHasher.sha256(token),
+                expiresAt,
+                now
+        );
+        String resetLink = passwordResetCompletionLink(link.tenantId(), link.intendedRole(), token);
+        sendPasswordResetEmail(school, link, expiresAt, resetLink);
+        return new InviteUserResultResponse(
+                email,
+                role,
+                "sent",
+                "Password reset email sent."
+        );
+    }
+
     private void archiveDeletedUser(UUID tenantId, UUID deletedByUserId, UUID userId, String email) {
         dsl.execute(
                 "insert into user_history (" +
@@ -694,6 +810,45 @@ public class AuthService {
                             htmlBody
                     ));
                 });
+    }
+
+    private void sendPasswordResetEmail(PublicSchoolResponse school, RegistrationLinkRow link, OffsetDateTime expiresAt, String resetLink) {
+        String subject = "Reset your " + school.name() + " SchoolDays password";
+        String textBody = """
+                Hello,
+
+                Use this secure link to reset your SchoolDays password for %s.
+
+                If the link is not clickable, copy and paste this URL into your browser:
+                %s
+
+                This link expires at %s.
+                """.formatted(
+                school.name(),
+                resetLink,
+                expiresAt
+        );
+        String htmlBody = """
+                <p>Hello,</p>
+                <p>Use this secure link to reset your SchoolDays password for %s.</p>
+                <p><a href="%s">Reset password</a></p>
+                <p>If the link is not clickable, copy and paste this URL into your browser:<br><span>%s</span></p>
+                <p>This link expires at %s.</p>
+                """.formatted(
+                escapeHtml(school.name()),
+                escapeHtml(resetLink),
+                escapeHtml(resetLink),
+                expiresAt
+        );
+
+        systemEmailService.send(new SystemEmailMessage(
+                link.email(),
+                systemEmailFromEmail,
+                school.name(),
+                subject,
+                textBody,
+                htmlBody
+        ));
     }
 
     private void sendSchoolAdminGrantedEmail(PublicSchoolResponse school, String email) {
@@ -833,9 +988,18 @@ public class AuthService {
     }
 
     private String registrationCompletionLink(UUID tenantId, String intendedRole, String token) {
+        return schoolAuthLink(tenantId, intendedRole, token, false);
+    }
+
+    private String passwordResetCompletionLink(UUID tenantId, String intendedRole, String token) {
+        return schoolAuthLink(tenantId, intendedRole, token, true);
+    }
+
+    private String schoolAuthLink(UUID tenantId, String intendedRole, String token, boolean passwordReset) {
         String encodedToken = urlEncode(token);
+        String query = "?token=" + encodedToken + (passwordReset ? "&reset=1" : "");
         if (tenantId == null) {
-            return publicBaseUrl + "?token=" + encodedToken;
+            return publicBaseUrl + query;
         }
         String portalPath = switch (normalizeRole(intendedRole)) {
             case "TEACHER" -> "/t";
@@ -843,8 +1007,8 @@ public class AuthService {
             default -> "";
         };
         return tenantDao.findActivePublicSchoolById(tenantId)
-                .map(school -> publicBaseUrl + "/school/" + urlEncode(school.slug()) + portalPath + "?token=" + encodedToken)
-                .orElse(publicBaseUrl + "?token=" + encodedToken);
+                .map(school -> publicBaseUrl + "/school/" + urlEncode(school.slug()) + portalPath + query)
+                .orElse(publicBaseUrl + query);
     }
 
     private String googleReturnUrl(UUID tenantId, String requestOrigin) {

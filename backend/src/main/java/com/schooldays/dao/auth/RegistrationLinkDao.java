@@ -28,6 +28,7 @@ public class RegistrationLinkDao {
                         USER_REGISTRATION_LINKS.TENANT_ID,
                         USER_REGISTRATION_LINKS.EMAIL,
                         USER_REGISTRATION_LINKS.INTENDED_ROLE,
+                        USER_REGISTRATION_LINKS.INVITATION_TYPE,
                         USER_REGISTRATION_LINKS.RELATED_INVITATION_ID
                 )
                 .from(USER_REGISTRATION_LINKS)
@@ -39,6 +40,7 @@ public class RegistrationLinkDao {
                         record.get(USER_REGISTRATION_LINKS.TENANT_ID),
                         record.get(USER_REGISTRATION_LINKS.EMAIL),
                         record.get(USER_REGISTRATION_LINKS.INTENDED_ROLE),
+                        record.get(USER_REGISTRATION_LINKS.INVITATION_TYPE),
                         record.get(USER_REGISTRATION_LINKS.RELATED_INVITATION_ID)
                 ));
     }
@@ -69,6 +71,7 @@ public class RegistrationLinkDao {
                 tenantId,
                 email,
                 intendedRole,
+                invitationType,
                 relatedInvitationId
         );
     }

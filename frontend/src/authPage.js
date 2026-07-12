@@ -1,4 +1,5 @@
 import {
+  completePasswordReset,
   completeRegistration,
   getAuthConfig,
   login,
@@ -49,6 +50,7 @@ export function renderAuthPage({
           ${completeRegistrationForm(Boolean(initialToken))}
           ${teacherInvitationForm(Boolean(initialToken))}
           ${schoolInvitationForm(Boolean(initialToken))}
+          ${passwordResetForm(Boolean(initialToken))}
         </section>
       </section>
     </main>
@@ -126,6 +128,12 @@ export function renderAuthPage({
       return requestParentRegistrationLink({
         tenantId: requireTenantId(),
         email,
+      });
+    }
+    if (mode === "reset") {
+      return completePasswordReset({
+        token: String(formData.get("token") || "").trim(),
+        password,
       });
     }
 
@@ -334,6 +342,36 @@ function schoolInvitationForm(hasEmailLinkToken = false) {
   `;
 }
 
+function passwordResetForm(hasEmailLinkToken = false) {
+  return `
+    <form class="auth-form" data-auth-form="reset" hidden>
+      <div class="form-heading">
+        <h2>Reset password</h2>
+        <p>${hasEmailLinkToken ? "Create a new password from the secure email link." : "Use the secure token from your password reset email."}</p>
+      </div>
+
+      ${hasEmailLinkToken
+        ? `<input name="token" required type="hidden" />`
+        : `
+          <label>
+            <span>Token <span class="required-marker" aria-label="required">*</span></span>
+            <input maxlength="200" name="token" placeholder="Paste email token" required type="text" />
+          </label>
+        `}
+
+      <label>
+        <span>New password <span class="required-marker" aria-label="required">*</span></span>
+        <input autocomplete="new-password" maxlength="128" minlength="8" name="password" required type="password" />
+      </label>
+
+      <p class="message error" data-error hidden role="alert"></p>
+      <p class="message success" data-success hidden role="status"></p>
+
+      <button data-submit type="submit">Reset password</button>
+    </form>
+  `;
+}
+
 function registrationFields(buttonText, { hasEmailLinkToken = false, includeAddress = false } = {}) {
   return `
     ${hasEmailLinkToken
@@ -471,12 +509,18 @@ function buttonLoadingText(mode) {
   if (mode === "school") {
     return "Creating";
   }
+  if (mode === "reset") {
+    return "Resetting";
+  }
   return "Creating account";
 }
 
 function successText(mode, user) {
   if (mode === "login") {
     return `Signed in as ${displayName(user)}.`;
+  }
+  if (mode === "reset") {
+    return `Password reset for ${displayName(user)}.`;
   }
   return `Account ready for ${displayName(user)}.`;
 }

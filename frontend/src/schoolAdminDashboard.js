@@ -1,6 +1,6 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
-import { deleteUser, importExternalStudents, inviteUsers, listExternalStudents } from "./api/auth.js";
+import { deleteUser, importExternalStudents, inviteUsers, listExternalStudents, sendPasswordResetLinks } from "./api/auth.js";
 import { checkInAttendance, checkInExternalStudent, getClassAttendanceGrid, listExternalCheckIns, listExternalCheckInCounts, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, listTeacherClasses, stopClass, updateClass } from "./api/classes.js";
@@ -276,6 +276,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let inviteUserError = "";
   let inviteUserResults = [];
   let inviteUserSubmitting = false;
+  let inviteUserPasswordResetSubmitting = false;
   let inviteUserSiteId = "";
   let inviteUserClassId = "";
   let inviteUserClasses = [];
@@ -1169,7 +1170,13 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
               <p class="invite-user-hint" data-invite-user-hint></p>
 
               <div class="operation-actions">
-                <button data-invite-user-submit type="submit">${inviteUserSubmitting ? "Sending..." : "Send invitation"}</button>
+                <button data-invite-user-submit type="submit" ${inviteUserPasswordResetSubmitting ? "disabled" : ""}>${inviteUserSubmitting ? "Sending..." : "Send invitation"}</button>
+                <button
+                  class="secondary-button"
+                  data-password-reset-submit
+                  type="button"
+                  ${inviteUserRole === "PARENT" || inviteUserSubmitting || inviteUserPasswordResetSubmitting ? "disabled" : ""}
+                >${inviteUserPasswordResetSubmitting ? "Sending reset..." : "Send password reset email"}</button>
               </div>
             </form>
 
@@ -1263,6 +1270,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       renderInviteUserHint();
     });
     root.querySelector("[data-invite-user-form]")?.addEventListener("submit", handleInviteUserSubmit);
+    root.querySelector("[data-password-reset-submit]")?.addEventListener("click", handleInvitePasswordResetSubmit);
     root.querySelector("[data-delete-user-form]")?.addEventListener("submit", handleDeleteUserSubmit);
     root.querySelector("[data-delete-user-email]")?.addEventListener("input", (event) => {
       deleteUserEmail = event.currentTarget.value;
@@ -2336,9 +2344,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       if (loadingInviteUserClasses) {
         return "Loading classes for the selected site...";
       }
-      return "Invite up to 5 teachers and assign them to the selected class.";
+      return "Invite up to 5 teachers and assign them to the selected class, or send reset links to existing teachers.";
     }
-    return "Invite any number of parents by email.";
+    if (inviteUserRole === "SCHOOL_ADMIN") {
+      return "Invite one school administrator, or send reset links to existing school administrators.";
+    }
+    return "Invite any number of parents by email. Password reset from this screen is for teachers and school administrators.";
   }
 
   function inviteUserResultHeading(result) {
@@ -2407,6 +2418,50 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       inviteUserError = inviteError instanceof Error ? inviteError.message : "Invitation could not be sent.";
     } finally {
       inviteUserSubmitting = false;
+      render();
+    }
+  }
+
+  async function handleInvitePasswordResetSubmit() {
+    const emails = splitEmails(inviteUserEmails);
+    inviteUserMessage = "";
+    inviteUserError = "";
+    inviteUserResults = [];
+
+    if (!["SCHOOL_ADMIN", "TEACHER"].includes(inviteUserRole)) {
+      inviteUserError = "Password reset emails can only be sent for school administrators or teachers.";
+      render();
+      return;
+    }
+    if (!emails.length) {
+      inviteUserError = "Enter at least one email address.";
+      render();
+      return;
+    }
+    if (emails.length > 5) {
+      inviteUserError = "Password reset emails are limited to 5 email addresses per request.";
+      render();
+      return;
+    }
+
+    inviteUserPasswordResetSubmitting = true;
+    render();
+
+    try {
+      const response = await sendPasswordResetLinks({
+        tenantId: school.tenantId,
+        role: inviteUserRole,
+        emails,
+      });
+      inviteUserResults = response.results || [];
+      inviteUserMessage = inviteUserResults.some((result) => result.outcome === "sent")
+        ? "Password reset request processed."
+        : "Password reset request completed.";
+    } catch (resetError) {
+      inviteUserMessage = "";
+      inviteUserError = resetError instanceof Error ? resetError.message : "Password reset email could not be sent.";
+    } finally {
+      inviteUserPasswordResetSubmitting = false;
       render();
     }
   }

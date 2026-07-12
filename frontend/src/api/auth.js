@@ -8,6 +8,10 @@ export function completeRegistration(request) {
   return apiPost("/api/auth/complete-registration", request, { auth: false });
 }
 
+export function completePasswordReset(request) {
+  return apiPost("/api/auth/complete-password-reset", request, { auth: false });
+}
+
 export function requestParentRegistrationLink({ tenantId, email }) {
   return apiPost("/api/auth/request-parent-registration-link", { tenantId, email }, { auth: false });
 }
@@ -17,6 +21,13 @@ export function inviteUsers({ tenantId, role, emails, classId }) {
     role,
     emails,
     classId,
+  });
+}
+
+export function sendPasswordResetLinks({ tenantId, role, emails }) {
+  return apiPost(`/api/tenants/${encodeURIComponent(tenantId)}/password-reset-links`, {
+    role,
+    emails,
   });
 }
 

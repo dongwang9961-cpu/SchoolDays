@@ -6,6 +6,7 @@ import java.util.UUID;
 import com.schooldays.dto.auth.AuthResponse;
 import com.schooldays.dto.auth.AuthConfigResponse;
 import com.schooldays.dto.auth.AuthenticatedUserResponse;
+import com.schooldays.dto.auth.CompletePasswordResetRequest;
 import com.schooldays.dto.auth.CompleteRegistrationRequest;
 import com.schooldays.dto.auth.GoogleCallbackResult;
 import com.schooldays.dto.auth.GoogleStartResponse;
@@ -62,6 +63,13 @@ public class AuthController {
             @Valid @RequestBody CompleteRegistrationRequest request
     ) {
         return authService.completeRegistration(request);
+    }
+
+    @PostMapping("/complete-password-reset")
+    public AuthResponse completePasswordReset(
+            @Valid @RequestBody CompletePasswordResetRequest request
+    ) {
+        return authService.completePasswordReset(request);
     }
 
     @PostMapping("/register/complete")

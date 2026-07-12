@@ -16,7 +16,7 @@ const school = schoolLookup.school;
 const schoolLoadError = schoolSlug && !school;
 const initialMode = getInitialMode();
 const portalQrMarkup = school ? await portalQrCodeMarkup() : "";
-const currentAuth = school ? await loadExistingSession() : null;
+const currentAuth = school && !urlParams.get("token") ? await loadExistingSession() : null;
 
 if (currentAuth) {
   handleAuthenticated(currentAuth);
@@ -82,6 +82,9 @@ function getInitialMode() {
     return "login";
   }
   if (urlParams.get("token")) {
+    if (isPasswordResetLink()) {
+      return "reset";
+    }
     if (schoolRoute.portal === "teacher") {
       return "teacher";
     }
@@ -113,6 +116,9 @@ function modeOptions() {
 }
 
 function completionModeLabel() {
+  if (isPasswordResetLink()) {
+    return "Reset password";
+  }
   if (schoolRoute.portal === "teacher") {
     return "Complete teacher invitation";
   }
@@ -126,12 +132,16 @@ function brandDescription() {
   if (school) {
     if (schoolRoute.portal === "teacher") {
       return urlParams.get("token")
-        ? "Complete the remaining steps from your teacher invitation email."
+        ? isPasswordResetLink()
+          ? "Reset your teacher account password from the secure email link."
+          : "Complete the remaining steps from your teacher invitation email."
         : "Teachers can sign in to this school.";
     }
     if (schoolRoute.portal === "admin") {
       return urlParams.get("token")
-        ? "Complete the remaining steps from your school administrator invitation email."
+        ? isPasswordResetLink()
+          ? "Reset your administrator account password from the secure email link."
+          : "Complete the remaining steps from your school administrator invitation email."
         : "School administrators can sign in to this school.";
     }
     return urlParams.get("token")
@@ -142,6 +152,10 @@ function brandDescription() {
     return schoolLookupErrorText();
   }
   return "Open a school URL like /school/longlong-art-studio to access that school website.";
+}
+
+function isPasswordResetLink() {
+  return urlParams.get("reset") === "1";
 }
 
 function schoolContextMarkup(portalQrMarkup = "") {

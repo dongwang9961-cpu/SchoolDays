@@ -180,6 +180,16 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
         return ResponseEntity.ok(authService.inviteUsers(tenantId, userId(authentication), request));
     }
 
+    @PostMapping("/password-reset-links")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    public ResponseEntity<InviteUserResponse> sendPasswordResetLinks(
+            @PathVariable("tenantId") UUID tenantId,
+            @Valid @RequestBody InviteUserRequest request,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(authService.sendPasswordResetLinks(tenantId, userId(authentication), request));
+    }
+
     @DeleteMapping("/users")
     @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
     public ResponseEntity<EndpointStatusResponse> deleteUser(

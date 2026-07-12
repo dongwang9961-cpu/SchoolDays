@@ -51,6 +51,7 @@ public class SecurityConfig {
                                 "/api/auth/request-parent-registration-link",
                                 "/api/auth/request-self-service-registration-link",
                                 "/api/auth/complete-registration",
+                                "/api/auth/complete-password-reset",
                                 "/api/auth/register/complete",
                                 "/api/auth/config",
                                 "/api/auth/google/start",
