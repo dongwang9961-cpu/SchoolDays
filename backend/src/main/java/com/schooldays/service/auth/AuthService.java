@@ -659,6 +659,7 @@ public class AuthService {
 
                             Use this secure link to complete your SchoolDays %s for %s.
 
+                            If the link is not clickable, copy and paste this URL into your browser:
                             %s
 
                             This link expires at %s.%s""".formatted(
@@ -672,11 +673,13 @@ public class AuthService {
                             <p>Hello,</p>
                             <p>Use this secure link to complete your SchoolDays %s for %s.</p>
                             <p><a href="%s">Complete registration</a></p>
+                            <p>If the link is not clickable, copy and paste this URL into your browser:<br><span>%s</span></p>
                             <p>This link expires at %s.</p>
                             %s
                             """.formatted(
                             escapeHtml(registrationLinkPurpose(response.intendedRole())),
                             escapeHtml(school.name()),
+                            escapeHtml(completionLink),
                             escapeHtml(completionLink),
                             response.expiresAt(),
                             classNoteHtml
