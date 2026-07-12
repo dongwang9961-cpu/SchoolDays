@@ -508,6 +508,12 @@ button:disabled {
   color: #123c69;
 }
 
+.app-nav button:disabled {
+  background: transparent;
+  color: rgba(220, 233, 246, 0.48);
+  opacity: 1;
+}
+
 .app-main {
   display: grid;
   gap: 22px;

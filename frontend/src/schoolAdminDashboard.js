@@ -188,6 +188,7 @@ const parentSections = [
     label: "Payments",
     title: "Payments",
     summary: "Pay required fees, upload receipts, and review payment history.",
+    disabled: true,
     actions: [],
     rows: ["No payment records loaded yet."],
   },
@@ -196,6 +197,7 @@ const parentSections = [
     label: "Attendance",
     title: "Attendance",
     summary: "Check in children and review attendance history.",
+    disabled: true,
     actions: [],
     rows: ["No attendance records loaded yet."],
   },
@@ -465,6 +467,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                     class="${section.id === activeSection.id ? "is-active" : ""}"
                     data-section-id="${escapeHtml(section.id)}"
                     type="button"
+                    ${section.disabled ? "disabled" : ""}
                   >
                     ${escapeHtml(section.label)}
                   </button>
@@ -4614,6 +4617,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   function pendingCheckInTasks() {
+    if (role === "PARENT") {
+      return [];
+    }
     if (!parentCheckInTaskDataReady()) {
       return [];
     }
