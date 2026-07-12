@@ -5615,7 +5615,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     return `
       <div class="app-mode-switcher">
         <button class="${teacherMode === "choice" ? "is-active" : ""}" data-teacher-mode="choice" type="button">Choice screen</button>
-        <button class="${teacherMode === "main" ? "is-active" : ""}" data-teacher-mode="main" type="button">Main UI</button>
+        <button class="${teacherMode === "main" ? "is-active" : ""}" type="button" disabled>Main UI</button>
         <button class="${teacherMode === "checkIn" ? "is-active" : ""}" data-teacher-mode="checkIn" type="button">Check in</button>
         <button class="${teacherMode === "externalAttendance" ? "is-active" : ""}" data-teacher-mode="externalAttendance" type="button">External attendance</button>
       </div>
@@ -5638,7 +5638,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
           </header>
 
           <div class="admin-choice-grid">
-            <button class="admin-choice-card" data-teacher-enter-main type="button">
+            <button class="admin-choice-card is-disabled" type="button" disabled>
               <span>Main UI</span>
               <strong>Open classroom workspace</strong>
               <small>Review your assigned classes, schedules, attendance, and notifications.</small>
@@ -5659,11 +5659,6 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     `;
 
     root.querySelector("[data-logout]").addEventListener("click", handleLogout);
-    root.querySelector("[data-teacher-enter-main]")?.addEventListener("click", () => {
-      teacherMode = "main";
-      activeSectionId = "overview";
-      render();
-    });
     root.querySelector("[data-teacher-enter-check-in]")?.addEventListener("click", () => {
       teacherMode = "checkIn";
       checkInFlowStage = "intro";

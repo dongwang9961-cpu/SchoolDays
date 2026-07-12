@@ -2009,11 +2009,33 @@ button.calendar-day.is-selected {
   box-shadow: 0 14px 38px rgba(35, 47, 70, 0.12);
 }
 
+.admin-choice-card:disabled,
+.admin-choice-card.is-disabled {
+  background: #f4f6fa;
+  border-color: #d8deeb;
+  box-shadow: none;
+  color: #7b8ba0;
+  cursor: not-allowed;
+}
+
+.admin-choice-card:disabled:hover,
+.admin-choice-card.is-disabled:hover {
+  border-color: #d8deeb;
+  box-shadow: none;
+}
+
 .admin-choice-card span {
   color: #2d6cdf;
   font-size: 0.84rem;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.admin-choice-card:disabled span,
+.admin-choice-card.is-disabled span,
+.admin-choice-card:disabled small,
+.admin-choice-card.is-disabled small {
+  color: #7b8ba0;
 }
 
 .admin-choice-card strong {
