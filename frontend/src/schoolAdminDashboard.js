@@ -314,6 +314,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let checkInStudentsPageSize = 25;
   let checkInStudentsTotalRows = 0;
   let checkInStudentsTotalPages = 1;
+  let checkInStudentQrModal = null;
   let checkInTodayListOpen = false;
   let checkInTodayListLoading = false;
   let checkInTodayListRows = [];
@@ -373,6 +374,11 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       notice = "Gmail connected.";
       error = "";
       loadNotifications();
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && checkInStudentQrModal) {
+      closeCheckInStudentQrModal();
     }
   });
 
@@ -1563,6 +1569,8 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     });
     root.querySelector("[data-check-in-students-close]")?.addEventListener("click", closeCheckInStudentsModal);
     root.querySelector("[data-check-in-students-print]")?.addEventListener("click", handlePrintSelectedStudentCards);
+    root.querySelector("[data-check-in-student-qr-modal]")?.addEventListener("click", closeCheckInStudentQrModal);
+    root.querySelector("[data-check-in-student-qr-close]")?.addEventListener("click", closeCheckInStudentQrModal);
     root.querySelector("[data-check-in-today-list-modal]")?.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) {
         closeTodayCheckInsModal();
@@ -1630,6 +1638,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     checkInStudentsOpen = false;
     checkInStudentsError = "";
     checkInStudentsMessage = "";
+    checkInStudentQrModal = null;
     destroyCheckInStudentsTabulator();
     render();
   }
@@ -1762,6 +1771,28 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
           </div>
         </section>
       </div>
+      ${checkInStudentQrModal ? renderCheckInStudentQrModal() : ""}
+    `;
+  }
+
+  function renderCheckInStudentQrModal() {
+    const card = checkInStudentQrModal;
+    return `
+      <div class="modal-backdrop check-in-qr-backdrop" data-check-in-student-qr-modal>
+        <section class="check-in-qr-panel" role="dialog" aria-modal="true" aria-labelledby="check-in-qr-title">
+          <div class="workspace-heading workspace-heading-row">
+            <div>
+              <h3 id="check-in-qr-title">${escapeHtml(card.displayName)}</h3>
+              <p>Student ID: ${escapeHtml(card.studentId || "-")}</p>
+            </div>
+            <button class="secondary-button compact-button" data-check-in-student-qr-close type="button">Close</button>
+          </div>
+          <div class="check-in-qr-code">
+            <img alt="QR code for ${escapeHtml(card.displayName)}" src="${card.qrDataUrl}">
+          </div>
+          <p class="check-in-qr-detail">Gender: ${escapeHtml(card.gender || "-")}</p>
+        </section>
+      </div>
     `;
   }
 
@@ -1853,6 +1884,17 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
           headerSort: false,
           width: 56,
         },
+        {
+          title: "QR",
+          formatter: () => `<button class="secondary-button compact-button check-in-row-action" type="button">Show QR</button>`,
+          headerSort: false,
+          hozAlign: "center",
+          width: 120,
+          cellClick: (event, cell) => {
+            event.stopPropagation();
+            void handleShowStudentQrCode(cell.getRow().getData());
+          },
+        },
         { title: "StudentID", field: "externalId", headerFilter: "input", width: 150 },
         { title: "LastName", field: "lastName", headerFilter: "input", width: 150 },
         { title: "FirstName", field: "firstName", headerFilter: "input", width: 150 },
@@ -1899,22 +1941,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     let printFrame;
     try {
       const cards = await Promise.all(
-        selectedStudents.map(async (student) => {
-          const displayName = student.studentName || [student.firstName, student.lastName].filter(Boolean).join(" ") || "Student";
-          const studentId = student.externalId || "";
-          const gender = student.genderCode || "";
-          const qrPayload = JSON.stringify({
-            studentId,
-            name: displayName,
-            gender,
-          });
-          const qrDataUrl = await QRCode.toDataURL(qrPayload, {
-            errorCorrectionLevel: "M",
-            margin: 1,
-            width: 220,
-          });
-          return { displayName, studentId, gender, qrDataUrl };
-        }),
+        selectedStudents.map((student) => createExternalStudentQrCard(student, 220)),
       );
       const cardsPerPage = 6;
       const cardPages = [];
@@ -2044,6 +2071,43 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     } finally {
       render();
     }
+  }
+
+  async function handleShowStudentQrCode(student) {
+    try {
+      checkInStudentQrModal = await createExternalStudentQrCard(student, 320);
+      checkInStudentsError = "";
+      render();
+    } catch (qrError) {
+      checkInStudentsError = qrError instanceof Error ? qrError.message : "QR code could not be generated.";
+      checkInStudentQrModal = null;
+      render();
+    }
+  }
+
+  function closeCheckInStudentQrModal() {
+    if (!checkInStudentQrModal) {
+      return;
+    }
+    checkInStudentQrModal = null;
+    render();
+  }
+
+  async function createExternalStudentQrCard(student, width) {
+    const displayName = student.studentName || [student.firstName, student.lastName].filter(Boolean).join(" ") || "Student";
+    const studentId = student.externalId || "";
+    const gender = student.genderCode || "";
+    const qrPayload = JSON.stringify({
+      studentId,
+      name: displayName,
+      gender,
+    });
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width,
+    });
+    return { displayName, studentId, gender, qrDataUrl };
   }
 
   async function handlePrintCheckOutSheet() {

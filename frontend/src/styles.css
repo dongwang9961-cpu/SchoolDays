@@ -2397,6 +2397,50 @@ button.calendar-day.is-selected {
   min-width: 0;
 }
 
+.check-in-row-action {
+  min-height: 32px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.check-in-qr-backdrop {
+  background: #f8fafc;
+  z-index: 70;
+}
+
+.check-in-qr-panel {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  max-width: 420px;
+  padding: 22px;
+  width: min(100%, 420px);
+}
+
+.check-in-qr-code {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  padding: 18px;
+}
+
+.check-in-qr-code img {
+  height: min(320px, 70vw);
+  width: min(320px, 70vw);
+}
+
+.check-in-qr-detail {
+  color: #5f6f86;
+  font-size: 0.95rem;
+  font-weight: 800;
+  margin: 0;
+}
+
 .check-in-today-list-panel {
   background: #ffffff;
   border: 1px solid #d8deeb;
