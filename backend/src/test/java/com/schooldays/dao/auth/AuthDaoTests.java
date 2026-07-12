@@ -343,6 +343,7 @@ class AuthDaoTests {
                 tenantId,
                 "parent@example.com",
                 "PARENT",
+                "self_assisted",
                 null
         ));
 
