@@ -228,7 +228,7 @@ public class AuthService {
         registrationLinkDao.markUsed(link.id(), now);
 
         AuthenticatedUser principal = userDetailsService.loadById(userId);
-        return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
+        return authResponse(principal);
     }
 
     @Transactional
@@ -258,7 +258,7 @@ public class AuthService {
         registrationLinkDao.markUsed(link.id(), now);
 
         AuthenticatedUser principal = userDetailsService.loadById(user.id());
-        return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
+        return authResponse(principal);
     }
 
     public GoogleStartResponse googleStart(UUID tenantId, String requestOrigin) {
@@ -316,7 +316,7 @@ public class AuthService {
 
         AuthenticatedUser principal = userDetailsService.loadById(userId);
         return new GoogleCallbackResult(
-                AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal),
+                authResponse(principal),
                 oauthState.returnUrl()
         );
     }
@@ -340,7 +340,7 @@ public class AuthService {
         tenantInvitationDao.markAccepted(invitation.id(), tenantId, now);
 
         AuthenticatedUser principal = userDetailsService.loadById(userId);
-        return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
+        return authResponse(principal);
     }
 
     @Transactional
@@ -358,7 +358,7 @@ public class AuthService {
         teacherInvitationDao.markAccepted(invitation.id(), userId, now);
 
         AuthenticatedUser principal = userDetailsService.loadById(userId);
-        return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
+        return authResponse(principal);
     }
 
     @Transactional
@@ -477,7 +477,7 @@ public class AuthService {
                 )
         );
         AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-        return AuthResponse.bearer(jwtTokenService.issueAccessToken(principal), principal);
+        return authResponse(principal);
     }
 
     public AuthenticatedUserResponse me(Authentication authentication) {
@@ -485,7 +485,23 @@ public class AuthService {
             throw new InvalidAuthRequestException("Authentication is required");
         }
         AuthenticatedUser principal = userDetailsService.loadById(UUID.fromString(jwt.getSubject()));
-        return AuthenticatedUserResponse.from(principal);
+        return authenticatedUserResponse(principal);
+    }
+
+    private AuthResponse authResponse(AuthenticatedUser principal) {
+        return AuthResponse.bearer(
+                jwtTokenService.issueAccessToken(principal),
+                principal,
+                authProviders(principal.id())
+        );
+    }
+
+    private AuthenticatedUserResponse authenticatedUserResponse(AuthenticatedUser principal) {
+        return AuthenticatedUserResponse.from(principal, authProviders(principal.id()));
+    }
+
+    private List<String> authProviders(UUID userId) {
+        return userIdentityDao.findProvidersByUserId(userId);
     }
 
     private RegistrationLinkResponse createRegistrationLink(

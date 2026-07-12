@@ -112,7 +112,7 @@ class AuthDaoTests {
         userDao = new UserDao(userRepository);
         roleDao = new RoleDao(dsl, roleRepository);
         registrationLinkDao = new RegistrationLinkDao(dsl, registrationLinkRepository);
-        userIdentityDao = new UserIdentityDao(userIdentityRepository);
+        userIdentityDao = new UserIdentityDao(dsl, userIdentityRepository);
         tenantDao = new TenantDao(dsl, tenantRepository);
         tenantInvitationDao = new TenantInvitationDao(dsl, tenantInvitationRepository);
         teacherInvitationDao = new TeacherInvitationDao(dsl, teacherInvitationRepository);
@@ -277,6 +277,8 @@ class AuthDaoTests {
 
         assertThat(userIdentityDao.findUserIdByProviderSubject("google", "google-subject"))
                 .contains(userId);
+        assertThat(userIdentityDao.findProvidersByUserId(userId))
+                .containsExactly("google");
         assertThat(userIdentityDao.findUserIdByProviderSubject("google", "missing"))
                 .isEmpty();
     }

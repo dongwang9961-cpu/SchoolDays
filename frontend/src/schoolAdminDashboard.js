@@ -485,7 +485,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
             </div>
             <div class="header-actions">
               ${parentCheckInTaskButton(checkInTasks)}
-              ${profileMenu(user)}
+              ${profileMenu(user, { profileDisabled: role === "PARENT" && hasExternalAuth(user) })}
             </div>
           </header>
 
@@ -6051,7 +6051,11 @@ function hasTenantRole(user, tenantId, role) {
   );
 }
 
-function profileMenu(user) {
+function hasExternalAuth(user) {
+  return Array.isArray(user?.authProviders) && user.authProviders.length > 0;
+}
+
+function profileMenu(user, { profileDisabled = false } = {}) {
   const email = user?.email || "Account";
   const initial = email.trim().charAt(0).toUpperCase() || "A";
   return `
@@ -6067,7 +6071,9 @@ function profileMenu(user) {
       </button>
       <div class="profile-dropdown" data-profile-menu hidden>
         <p>Signed in as <strong>${escapeHtml(email)}</strong></p>
-        <button data-profile-action="profile" type="button">My profile</button>
+        ${profileDisabled
+          ? `<button title="Profile editing is disabled for third-party parent sign-ins." type="button" disabled>My profile</button>`
+          : `<button data-profile-action="profile" type="button">My profile</button>`}
         <button data-logout type="button">Sign out</button>
       </div>
     </div>

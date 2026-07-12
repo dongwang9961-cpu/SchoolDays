@@ -10,9 +10,14 @@ public record AuthenticatedUserResponse(
         UUID id,
         String email,
         String phone,
-        List<TenantRole> tenantRoles
+        List<TenantRole> tenantRoles,
+        List<String> authProviders
 ) {
     public static AuthenticatedUserResponse from(AuthenticatedUser user) {
-        return new AuthenticatedUserResponse(user.id(), user.email(), user.phone(), user.tenantRoles());
+        return from(user, List.of());
+    }
+
+    public static AuthenticatedUserResponse from(AuthenticatedUser user, List<String> authProviders) {
+        return new AuthenticatedUserResponse(user.id(), user.email(), user.phone(), user.tenantRoles(), authProviders == null ? List.of() : List.copyOf(authProviders));
     }
 }
