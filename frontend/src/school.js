@@ -17,6 +17,7 @@ const schoolLoadError = schoolSlug && !school;
 const initialMode = getInitialMode();
 const portalQrMarkup = school ? await portalQrCodeMarkup() : "";
 const currentAuth = school && !urlParams.get("token") ? await loadExistingSession() : null;
+let authenticatedBackGuardEnabled = false;
 
 if (currentAuth) {
   handleAuthenticated(currentAuth);
@@ -46,6 +47,39 @@ function consumeAccessTokenHash() {
   const nextHash = hashParams.toString();
   const nextUrl = window.location.pathname + window.location.search + (nextHash ? `#${nextHash}` : "");
   window.history.replaceState(null, "", nextUrl);
+}
+
+function enableAuthenticatedBackGuard() {
+  if (authenticatedBackGuardEnabled || !window.history?.pushState) {
+    return;
+  }
+  authenticatedBackGuardEnabled = true;
+  const portalUrl = authenticatedPortalUrl();
+  window.history.replaceState({ schooldaysAuthGuard: true }, "", portalUrl);
+  window.history.pushState({ schooldaysAuthGuard: true }, "", portalUrl);
+  window.addEventListener("popstate", handleAuthenticatedBackNavigation);
+}
+
+function disableAuthenticatedBackGuard() {
+  if (!authenticatedBackGuardEnabled) {
+    return;
+  }
+  authenticatedBackGuardEnabled = false;
+  window.removeEventListener("popstate", handleAuthenticatedBackNavigation);
+}
+
+function handleAuthenticatedBackNavigation() {
+  if (!authenticatedBackGuardEnabled || !localStorage.getItem("schooldays.accessToken")) {
+    return;
+  }
+  window.history.pushState({ schooldaysAuthGuard: true }, "", authenticatedPortalUrl());
+}
+
+function authenticatedPortalUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("token");
+  url.searchParams.delete("reset");
+  return url.pathname + url.search + url.hash;
 }
 
 function getSchoolRouteFromPath(pathname) {
@@ -218,6 +252,7 @@ function schoolLookupErrorText() {
 function handleAuthenticated(response) {
   const role = school ? schoolPortalRole(response.user, school.tenantId) : "";
   if (role) {
+    enableAuthenticatedBackGuard();
     if (role === "PARENT" && parentProfileIncomplete(response.user)) {
       renderParentProfileCompletion(response);
       return;
@@ -227,8 +262,7 @@ function handleAuthenticated(response) {
       school,
       user: response.user,
       onLogout: () => {
-        localStorage.removeItem("schooldays.accessToken");
-        returnToLoginPage();
+        endAuthenticatedSession();
       },
     });
     return;
@@ -248,8 +282,7 @@ function handleAuthenticated(response) {
   `;
 
   document.querySelector("[data-return-login]").addEventListener("click", () => {
-    localStorage.removeItem("schooldays.accessToken");
-    returnToLoginPage();
+    endAuthenticatedSession();
   });
 }
 
@@ -336,8 +369,7 @@ function renderParentProfileCompletion(response) {
         school,
         user: { ...response.user, phone: profile.phone },
         onLogout: () => {
-          localStorage.removeItem("schooldays.accessToken");
-          returnToLoginPage();
+          endAuthenticatedSession();
         },
       });
     } catch (error) {
@@ -347,6 +379,12 @@ function renderParentProfileCompletion(response) {
       submitButton.textContent = "Open parent portal";
     }
   });
+}
+
+function endAuthenticatedSession() {
+  disableAuthenticatedBackGuard();
+  localStorage.removeItem("schooldays.accessToken");
+  returnToLoginPage();
 }
 
 function returnToLoginPage() {
