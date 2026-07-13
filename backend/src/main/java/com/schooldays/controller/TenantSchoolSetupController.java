@@ -210,7 +210,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/external-students")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
     public ResponseEntity<ExternalStudentListResponse> listExternalStudents(
             @PathVariable("tenantId") UUID tenantId,
             @RequestParam(value = "page", required = false) Integer page,

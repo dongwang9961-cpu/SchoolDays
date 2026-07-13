@@ -357,9 +357,16 @@ let checkInBarcodeValue = "";
 let checkInManualStudentId = "";
 let checkInLastRawBarcodeValue = "";
 let checkInExternalCheckInSubmitting = false;
+let checkInQuickListOpen = false;
+let checkInQuickListMessage = "";
+let checkInQuickListError = "";
+let checkInQuickSubmittingStudentId = "";
+let checkInQuickTabulator = null;
 let checkInScannerStatus = "Starting camera...";
+let checkInPeriodicRefreshTimer = null;
 const classListCache = new Map();
 const CLASS_LIST_CACHE_TTL_MS = 5000;
+const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
   if (role === "SCHOOL_ADMIN") {
     loadSites();
@@ -382,6 +389,8 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && checkInStudentQrModal) {
       closeCheckInStudentQrModal();
+    } else if (event.key === "Escape" && checkInQuickListOpen) {
+      closeQuickCheckInList();
     }
   });
 
@@ -389,12 +398,16 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
   function render() {
     scheduleNoticeDismissal();
+    syncCheckInPeriodicRefresh();
     if (!((role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "camera")
       || (role === "TEACHER" && teacherMode === "checkIn" && checkInFlowStage === "camera"))) {
       stopCheckInScanner();
     }
     if (!checkInStudentsOpen) {
       destroyCheckInStudentsTabulator();
+    }
+    if (!checkInQuickListOpen) {
+      destroyQuickCheckInTabulator();
     }
     if (role === "TEACHER" && teacherMode === "choice") {
       renderTeacherChoiceScreen();
@@ -1438,10 +1451,10 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
           </header>
 
           <section class="standalone-panel check-in-launch-panel">
-            <div class="check-in-action-group">
+            <div class="check-in-action-group check-in-camera-card">
               <div class="check-in-action-group-header">
                 <h3>Camera check-in</h3>
-                <p>Select a site and class, then start the camera.</p>
+                <p>Select a site and class, then start the camera or check students in from the list.</p>
               </div>
               <div class="check-in-selector-grid">
                 <label class="check-in-selector-field">
@@ -1464,6 +1477,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
               ${selectedClassRecord && !classIsScheduledToday ? `<p class="message error" role="alert">No class is scheduled today for the selected class.</p>` : ""}
               <div class="check-in-launch-actions">
                 <button class="check-in-launch-button" data-check-in-start type="button" ${!selectedSiteId || !selectedClassId || !classIsScheduledToday ? "disabled" : ""}>Check In</button>
+                <button class="secondary-button compact-button" data-check-in-quick-toggle type="button" ${!selectedSiteId || !selectedClassId || !classIsScheduledToday ? "disabled" : ""}>
+                  Quick check-in
+                </button>
                 <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedSiteId || !selectedClassId ? "disabled" : ""}>Today's check-in list</button>
                 <button class="secondary-button compact-button" data-check-in-print-sheet type="button" ${!selectedSiteId || !selectedClassId ? "disabled" : ""}>Print check-out sheet</button>
               </div>
@@ -1509,6 +1525,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         </section>
       </main>
       ${checkInStudentsOpen ? renderCheckInStudentsModal() : ""}
+      ${checkInQuickListOpen ? renderQuickCheckInList() : ""}
       ${checkInTodayListOpen ? renderCheckInTodayListModal() : ""}
     `;
 
@@ -1517,6 +1534,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       adminMode = "";
       checkInFlowStage = "intro";
       checkInSelectionError = "";
+      resetQuickCheckInState();
       render();
     });
     root.querySelector("[data-check-in-site-select]")?.addEventListener("change", (event) => {
@@ -1527,6 +1545,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       checkInTodayListCount = 0;
       checkInTodayListQueryKey = "";
       checkInTodayListDate = "";
+      resetQuickCheckInState();
       render();
       if (selectedSiteId) {
         loadClasses();
@@ -1539,6 +1558,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       checkInTodayListCount = 0;
       checkInTodayListQueryKey = "";
       checkInTodayListDate = "";
+      resetQuickCheckInState();
       render();
       if (selectedSiteId && selectedClassId) {
         loadTodayCheckIns();
@@ -1558,6 +1578,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         return;
       }
       checkInManualStudentId = "";
+      resetQuickCheckInState();
       unlockCheckInAudio();
       unlockCheckInSpeech();
       checkInFlowStage = "camera";
@@ -1566,6 +1587,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     root.querySelector("[data-check-in-today-list]")?.addEventListener("click", handleShowTodayCheckIns);
     root.querySelector("[data-check-in-print-sheet]")?.addEventListener("click", handlePrintCheckOutSheet);
     root.querySelector("[data-check-in-show-all]")?.addEventListener("click", handleShowCheckInStudents);
+    bindQuickCheckInControls();
     root.querySelector("[data-check-in-import-file]")?.addEventListener("change", (event) => {
       checkInImportFile = event.currentTarget.files?.[0] || null;
       checkInImportError = "";
@@ -1588,11 +1610,18 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       }
     });
     root.querySelector("[data-check-in-today-list-close]")?.addEventListener("click", closeTodayCheckInsModal);
+    root.querySelector("[data-check-in-quick-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeQuickCheckInList();
+      }
+    });
     initializeCheckInStudentsTabulator();
+    initializeQuickCheckInTabulator();
   }
 
   function handleLogout() {
     stopCheckInScanner();
+    stopCheckInPeriodicRefresh();
     onLogout();
   }
 
@@ -1637,6 +1666,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
   }
 
   async function handleShowCheckInStudents() {
+    resetQuickCheckInState();
     checkInStudentsOpen = true;
     checkInStudentsError = "";
     checkInStudentsMessage = "";
@@ -1652,6 +1682,266 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     checkInStudentQrModal = null;
     destroyCheckInStudentsTabulator();
     render();
+  }
+
+  async function handleQuickCheckInToggle() {
+    if (checkInQuickListOpen) {
+      closeQuickCheckInList();
+      return;
+    }
+    checkInQuickListOpen = true;
+    checkInQuickListError = "";
+    checkInQuickListMessage = "";
+    checkInStudentsError = "";
+    checkInStudentsOpen = false;
+    checkInStudentQrModal = null;
+    destroyCheckInStudentsTabulator();
+    render();
+    const loaders = [];
+    if (!checkInStudents.length && !checkInStudentsLoading) {
+      loaders.push(loadCheckInStudents());
+    }
+    if (selectedClassId) {
+      checkInTodayListDate = quickCheckInDate();
+      loaders.push(loadTodayCheckIns({ force: true }));
+    }
+    await Promise.all(loaders);
+  }
+
+  function resetQuickCheckInState() {
+    checkInQuickListOpen = false;
+    checkInQuickListMessage = "";
+    checkInQuickListError = "";
+    checkInQuickSubmittingStudentId = "";
+    destroyQuickCheckInTabulator();
+  }
+
+  function closeQuickCheckInList() {
+    resetQuickCheckInState();
+    render();
+  }
+
+  function syncCheckInPeriodicRefresh() {
+    const shouldRefresh = Boolean(checkInQuickListOpen && selectedClassId);
+    if (!shouldRefresh) {
+      stopCheckInPeriodicRefresh();
+      return;
+    }
+    if (checkInPeriodicRefreshTimer) {
+      return;
+    }
+    checkInPeriodicRefreshTimer = window.setInterval(() => {
+      if (!checkInQuickListOpen || !selectedClassId) {
+        stopCheckInPeriodicRefresh();
+        return;
+      }
+      checkInTodayListDate = quickCheckInDate();
+      void loadTodayCheckIns({ force: true, background: true });
+    }, CHECK_IN_PERIODIC_REFRESH_MS);
+  }
+
+  function stopCheckInPeriodicRefresh() {
+    if (!checkInPeriodicRefreshTimer) {
+      return;
+    }
+    clearInterval(checkInPeriodicRefreshTimer);
+    checkInPeriodicRefreshTimer = null;
+  }
+
+  async function refreshQuickCheckInList() {
+    checkInQuickListMessage = "";
+    checkInQuickListError = "";
+    checkInStudentsError = "";
+    checkInStudents = [];
+    checkInStudentsTotalRows = 0;
+    checkInStudentsTotalPages = 1;
+    checkInStudentsPage = 1;
+    checkInTodayListRows = [];
+    checkInTodayListCount = 0;
+    checkInTodayListQueryKey = "";
+    checkInTodayListDate = quickCheckInDate();
+    render();
+    await Promise.all([
+      loadCheckInStudents(),
+      selectedClassId ? loadTodayCheckIns({ force: true }) : Promise.resolve(),
+    ]);
+  }
+
+  function renderQuickCheckInList() {
+    const rowCount = checkInStudentsTotalRows || checkInStudents.length;
+    const statusText = checkInStudentsLoading
+      ? "Loading students..."
+      : `${rowCount} student${rowCount === 1 ? "" : "s"} available.`;
+    return `
+      <div class="modal-backdrop" data-check-in-quick-modal>
+        <section class="check-in-students-panel check-in-quick-panel" role="dialog" aria-modal="true" aria-labelledby="check-in-quick-title">
+          <div class="workspace-heading workspace-heading-row">
+            <div>
+              <h3 id="check-in-quick-title">Quick check-in</h3>
+              <p>${escapeHtml(statusText)}</p>
+              <p class="check-in-selection-count">${escapeHtml(selectedClass() ? `Class: ${selectedClass().name}` : "Selected class")}</p>
+            </div>
+            <div class="check-in-students-actions">
+              <button class="secondary-button compact-button" data-check-in-quick-refresh type="button" ${checkInStudentsLoading ? "disabled" : ""}>Refresh</button>
+              <button class="secondary-button compact-button" data-check-in-quick-close type="button">Close</button>
+            </div>
+          </div>
+          ${checkInQuickListError || checkInStudentsError ? `<p class="message error" role="alert">${escapeHtml(checkInQuickListError || checkInStudentsError)}</p>` : ""}
+          ${checkInQuickListMessage ? `<p class="message success" role="status">${escapeHtml(checkInQuickListMessage)}</p>` : ""}
+          <div class="check-in-students-table-shell">
+            <div data-check-in-quick-tabulator class="check-in-students-tabulator"></div>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function bindQuickCheckInControls() {
+    root.querySelector("[data-check-in-quick-toggle]")?.addEventListener("click", () => {
+      void handleQuickCheckInToggle();
+    });
+    root.querySelector("[data-check-in-quick-close]")?.addEventListener("click", closeQuickCheckInList);
+    root.querySelector("[data-check-in-quick-refresh]")?.addEventListener("click", () => {
+      void refreshQuickCheckInList();
+    });
+  }
+
+  function quickCheckInDate() {
+    return formatLocalDateForTimezone(new Date(), selectedSite()?.timezone);
+  }
+
+  function quickCheckInQueryKey() {
+    return [selectedClassId || "", quickCheckInDate()].join(":");
+  }
+
+  function quickCheckInStatusLoaded() {
+    return Boolean(selectedClassId && checkInTodayListQueryKey === quickCheckInQueryKey() && !checkInTodayListLoading);
+  }
+
+  function quickCheckedInStudentIds() {
+    if (!quickCheckInStatusLoaded()) {
+      return new Set();
+    }
+    return new Set(
+      checkInTodayListRows
+        .map((row) => String(row.externalStudentId || "").trim())
+        .filter(Boolean)
+    );
+  }
+
+  function applyLocalExternalCheckIn(response = {}, fallback = {}) {
+    const externalStudentId = String(response.externalStudentId || fallback.externalStudentId || "").trim();
+    if (!externalStudentId || !selectedClassId) {
+      return;
+    }
+    const checkDate = String(response.checkDate || fallback.checkDate || quickCheckInDate());
+    const classId = String(response.classId || selectedClassId);
+    if (classId !== String(selectedClassId)) {
+      return;
+    }
+    const row = {
+      id: response.id || `local-${classId}-${checkDate}-${externalStudentId}`,
+      seqId: response.seqId || null,
+      externalStudentId,
+      studentName: fallback.studentName || response.studentName || "",
+      gender: fallback.gender || response.gender || "",
+      classId,
+      className: response.className || selectedClass()?.name || "",
+      checkDate,
+      checkInTime: response.checkInTime || new Date().toISOString(),
+      checkedInByUserId: response.checkedInByUserId || "",
+      checkedInByRole: response.checkedInByRole || role,
+      status: response.status || "checked_in",
+      barcodeValue: fallback.barcodeValue || response.barcodeValue || externalStudentId,
+      createdAt: response.createdAt || new Date().toISOString(),
+      updatedAt: response.updatedAt || new Date().toISOString(),
+    };
+
+    checkInTodayListDate = checkDate;
+    checkInTodayListQueryKey = [selectedClassId, checkDate].join(":");
+    checkInTodayListRows = [
+      row,
+      ...checkInTodayListRows.filter(
+        (existing) => String(existing.externalStudentId || "").trim() !== externalStudentId
+      ),
+    ];
+    checkInTodayListCount = checkInTodayListRows.length;
+    checkInTodayListError = "";
+  }
+
+  async function handleQuickCheckInStudent(studentId) {
+    const normalizedStudentId = String(studentId || "").trim();
+    if (!normalizedStudentId) {
+      checkInQuickListError = "Student ID is missing for this row.";
+      checkInQuickListMessage = "";
+      render();
+      return;
+    }
+    if (!selectedClassId) {
+      checkInQuickListError = role === "TEACHER"
+        ? "Select a class before checking in external students."
+        : "Select a site and class before checking in external students.";
+      checkInQuickListMessage = "";
+      render();
+      return;
+    }
+    if (checkInExternalCheckInSubmitting) {
+      return;
+    }
+    if (!quickCheckInStatusLoaded()) {
+      checkInQuickListError = "Loading today's check-ins. Try again in a moment.";
+      checkInQuickListMessage = "";
+      render();
+      return;
+    }
+    if (quickCheckedInStudentIds().has(normalizedStudentId)) {
+      checkInQuickListError = "";
+      checkInQuickListMessage = "This student is already checked in for this class today.";
+      render();
+      return;
+    }
+
+    const student = checkInStudents.find((row) => String(row.externalId || "").trim() === normalizedStudentId) || null;
+    if (!student) {
+      checkInQuickListError = "Student could not be found in the quick list.";
+      checkInQuickListMessage = "";
+      render();
+      return;
+    }
+
+    const displayName = externalStudentDisplayName(student);
+    const displayValue = formatExternalStudentBarcode({
+      studentId: normalizedStudentId,
+      name: displayName,
+    });
+    checkInQuickSubmittingStudentId = normalizedStudentId;
+    checkInQuickListError = "";
+    checkInQuickListMessage = "";
+    render();
+
+    const checkedIn = await submitExternalStudentCheckIn({
+      externalStudentId: normalizedStudentId,
+      displayValue,
+      studentName: displayName,
+      gender: student.genderCode || null,
+      barcodeValue: normalizedStudentId,
+    });
+
+    checkInQuickSubmittingStudentId = "";
+    if (checkedIn) {
+      checkInQuickListMessage = `Checked in ${displayValue}.`;
+      checkInQuickListError = "";
+    } else {
+      checkInQuickListMessage = "";
+      checkInQuickListError = checkInScannerStatus || "Student could not be checked in.";
+    }
+    render();
+  }
+
+  function externalStudentDisplayName(student) {
+    return student?.studentName
+      || [student?.firstName, student?.lastName].filter(Boolean).join(" ").trim()
+      || "Student";
   }
 
   async function handleShowTodayCheckIns() {
@@ -1703,10 +1993,13 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       if (checkInStudentsOpen && !checkInStudentsError) {
         await initializeCheckInStudentsTabulator();
       }
+      if (checkInQuickListOpen && !checkInStudentsError) {
+        await initializeQuickCheckInTabulator();
+      }
     }
   }
 
-  async function loadTodayCheckIns({ force = false } = {}) {
+  async function loadTodayCheckIns({ force = false, background = false } = {}) {
     if (checkInTodayListLoading || !selectedClassId) {
       return;
     }
@@ -1718,7 +2011,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       checkInTodayListCount = 0;
       checkInTodayListQueryKey = [selectedClassId, queryDate].join(":");
       checkInTodayListError = "";
-      render();
+      if (!background) {
+        render();
+      }
       return;
     }
     const currentQueryKey = [selectedClassId, queryDate].join(":");
@@ -1727,7 +2022,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     }
     checkInTodayListLoading = true;
     checkInTodayListError = "";
-    render();
+    if (!background) {
+      render();
+    }
     try {
       const response = await listExternalCheckIns({
         tenantId: school.tenantId,
@@ -1864,6 +2161,13 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
     updateCheckInSelectionCount(0);
   }
 
+  function destroyQuickCheckInTabulator() {
+    if (checkInQuickTabulator) {
+      checkInQuickTabulator.destroy();
+      checkInQuickTabulator = null;
+    }
+  }
+
   async function initializeCheckInStudentsTabulator() {
     const element = root.querySelector("[data-check-in-students-tabulator]");
     if (!element || !checkInStudentsOpen) {
@@ -1927,6 +2231,79 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       updateCheckInSelectionCount(Array.isArray(selectedData) ? selectedData.length : 0);
     });
     updateCheckInSelectionCount(checkInStudentsTabulator.getSelectedData?.().length || 0);
+  }
+
+  async function initializeQuickCheckInTabulator() {
+    const element = root.querySelector("[data-check-in-quick-tabulator]");
+    if (!element || !checkInQuickListOpen) {
+      return;
+    }
+
+    const Tabulator = await loadTabulator();
+    if (!element.isConnected || !checkInQuickListOpen) {
+      return;
+    }
+
+    destroyQuickCheckInTabulator();
+    const statusLoaded = quickCheckInStatusLoaded();
+    const checkedInStudentIds = quickCheckedInStudentIds();
+    checkInQuickTabulator = new Tabulator(element, {
+      data: checkInStudents.map((student) => ({
+        externalId: student.externalId || "",
+        lastName: student.lastName || "",
+        firstName: student.firstName || "",
+        studentName: student.studentName || "",
+        birthDate: student.birthDate || "",
+        gradeLevelCode: student.gradeLevelCode || "",
+        genderCode: student.genderCode || "",
+      })),
+      columns: [
+        {
+          title: "Action",
+          formatter: (cell) => {
+            const row = cell.getRow().getData();
+            const studentId = String(row.externalId || "").trim();
+            const isSubmitting = Boolean(checkInQuickSubmittingStudentId && checkInQuickSubmittingStudentId === studentId);
+            const alreadyCheckedIn = Boolean(studentId && checkedInStudentIds.has(studentId));
+            const waitingForStatus = !statusLoaded;
+            const disabled = !studentId || waitingForStatus || alreadyCheckedIn || isSubmitting || checkInExternalCheckInSubmitting;
+            const label = alreadyCheckedIn
+              ? "Checked in"
+              : isSubmitting
+                ? "Checking..."
+                : waitingForStatus
+                  ? "Loading..."
+                  : "Check in";
+            return `<button class="secondary-button compact-button check-in-row-action" type="button" ${disabled ? "disabled" : ""}>${label}</button>`;
+          },
+          headerSort: false,
+          hozAlign: "center",
+          width: 130,
+          cellClick: (event, cell) => {
+            event.stopPropagation();
+            const button = event.target?.closest?.("button");
+            if (!button || button.disabled) {
+              return;
+            }
+            void handleQuickCheckInStudent(cell.getRow().getData().externalId || "");
+          },
+        },
+        { title: "StudentID", field: "externalId", headerFilter: "input", width: 150 },
+        { title: "LastName", field: "lastName", headerFilter: "input", width: 150 },
+        { title: "FirstName", field: "firstName", headerFilter: "input", width: 150 },
+        { title: "StudentName", field: "studentName", headerFilter: "input", width: 220 },
+        { title: "DOB", field: "birthDate", headerFilter: "input", width: 120 },
+        { title: "GradeLevelCode", field: "gradeLevelCode", headerFilter: "input", width: 160 },
+        { title: "GenderCode", field: "genderCode", headerFilter: "input", width: 140 },
+      ],
+      height: "100%",
+      layout: "fitDataFill",
+      placeholder: checkInStudentsLoading ? "Loading..." : "No external students imported yet.",
+      movableColumns: true,
+      columnDefaults: {
+        vertAlign: "middle",
+      },
+    });
   }
 
   async function handlePrintSelectedStudentCards() {
@@ -3020,10 +3397,10 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       updateCheckInStatus(role === "TEACHER"
         ? "Select a class before checking in external students."
         : "Select a site and class before checking in external students.", true);
-      return;
+      return false;
     }
     if (checkInExternalCheckInSubmitting) {
-      return;
+      return false;
     }
 
     checkInExternalCheckInSubmitting = true;
@@ -3031,11 +3408,12 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
 
     try {
       const site = selectedSite();
+      const checkDate = formatLocalDateForTimezone(new Date(), site?.timezone);
       const response = await checkInExternalStudent({
         tenantId: school.tenantId,
         externalStudentId,
         classId: selectedClassId,
-        checkDate: formatLocalDateForTimezone(new Date(), site?.timezone),
+        checkDate,
         studentName: studentName || null,
         gender: gender || null,
         barcodeValue: barcodeValue || externalStudentId,
@@ -3051,15 +3429,33 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       updateCheckInStatus(`Checked in ${confirmation}.`);
       playCheckInSuccessSound();
       speakCheckInSuccess(confirmation);
-      await loadTodayCheckIns({ force: true });
+      applyLocalExternalCheckIn(response, {
+        externalStudentId,
+        studentName,
+        gender,
+        barcodeValue: barcodeValue || externalStudentId,
+        checkDate,
+      });
+      return true;
     } catch (checkInError) {
-      const message = checkInError instanceof Error && checkInError.status === 409
+      const alreadyCheckedIn = checkInError instanceof Error && checkInError.status === 409;
+      const message = alreadyCheckedIn
         ? "This student has already checked in."
         : checkInError instanceof Error
           ? checkInError.message
           : "External check-in could not be saved.";
       playCheckInFailureSound();
       updateCheckInStatus(message, true);
+      if (alreadyCheckedIn) {
+        applyLocalExternalCheckIn({}, {
+          externalStudentId,
+          studentName,
+          gender,
+          barcodeValue: barcodeValue || externalStudentId,
+          checkDate: formatLocalDateForTimezone(new Date(), selectedSite()?.timezone),
+        });
+      }
+      return false;
     } finally {
       checkInExternalCheckInSubmitting = false;
     }
@@ -5703,7 +6099,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
             <section class="admin-choice-card teacher-check-in-card">
               <span>Camera check-in</span>
               <strong>Choose a class and start</strong>
-              <small>Pick one of your assigned classes, then open the camera check-in flow.</small>
+              <small>Pick one of your assigned classes, then open the camera or check students in from the list.</small>
               <div class="teacher-check-in-card-body">
                 <label class="check-in-selector-field">
                   <span>Class</span>
@@ -5717,6 +6113,9 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
                 ${selectedClassRecord && !classIsScheduledToday ? `<p class="message error" role="alert">No class is scheduled today for the selected class.</p>` : ""}
               <div class="check-in-launch-actions">
                   <button class="check-in-launch-button" data-teacher-check-in-start type="button" ${!selectedClassId || !classIsScheduledToday ? "disabled" : ""}>Check In</button>
+                  <button class="secondary-button compact-button" data-check-in-quick-toggle type="button" ${!selectedClassId || !classIsScheduledToday ? "disabled" : ""}>
+                    Quick check-in
+                  </button>
                   <button class="secondary-button compact-button" data-check-in-today-list type="button" ${!selectedClassId ? "disabled" : ""}>Today's check-in list</button>
                   <button class="secondary-button compact-button" data-check-in-print-sheet type="button" ${!selectedClassId ? "disabled" : ""}>Print check-out sheet</button>
                 </div>
@@ -5725,6 +6124,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
           </div>
         </section>
       </main>
+      ${checkInQuickListOpen ? renderQuickCheckInList() : ""}
       ${checkInTodayListOpen ? renderCheckInTodayListModal() : ""}
     `;
 
@@ -5733,6 +6133,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       teacherMode = "choice";
       checkInFlowStage = "intro";
       checkInSelectionError = "";
+      resetQuickCheckInState();
       render();
     });
     root.querySelector("[data-teacher-check-in-class-select]")?.addEventListener("change", (event) => {
@@ -5742,6 +6143,7 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
       checkInTodayListCount = 0;
       checkInTodayListQueryKey = "";
       checkInTodayListDate = "";
+      resetQuickCheckInState();
       render();
       if (selectedClassId) {
         loadTodayCheckIns();
@@ -5760,17 +6162,25 @@ const CLASS_LIST_CACHE_TTL_MS = 5000;
         render();
         return;
       }
+      resetQuickCheckInState();
       checkInFlowStage = "camera";
       render();
     });
     root.querySelector("[data-check-in-today-list]")?.addEventListener("click", handleShowTodayCheckIns);
     root.querySelector("[data-check-in-print-sheet]")?.addEventListener("click", handlePrintCheckOutSheet);
+    bindQuickCheckInControls();
+    root.querySelector("[data-check-in-quick-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeQuickCheckInList();
+      }
+    });
     root.querySelector("[data-check-in-today-list-close]")?.addEventListener("click", closeTodayCheckInsModal);
     root.querySelector("[data-check-in-today-list-modal]")?.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) {
         closeTodayCheckInsModal();
       }
     });
+    initializeQuickCheckInTabulator();
   }
 
   function renderTeacherCheckIn() {

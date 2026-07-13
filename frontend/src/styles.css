@@ -2436,6 +2436,10 @@ button.calendar-day.is-selected {
   white-space: nowrap;
 }
 
+.check-in-quick-panel {
+  width: min(100%, 1180px);
+}
+
 .check-in-qr-backdrop {
   background: #f8fafc;
   z-index: 70;
@@ -2803,6 +2807,14 @@ button.calendar-day.is-selected {
 
   .check-in-manual-form {
     grid-template-columns: 1fr;
+  }
+
+  .check-in-quick-panel .workspace-heading-row {
+    display: grid;
+  }
+
+  .check-in-quick-panel .check-in-students-actions {
+    justify-content: flex-start;
   }
 
   .check-in-launch-panel {
