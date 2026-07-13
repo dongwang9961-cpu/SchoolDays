@@ -7,6 +7,8 @@ import {
   startGoogleAuth,
 } from "./api/auth.js";
 
+const REMEMBERED_LOGIN_EMAIL_KEY = "schooldays.rememberedLoginEmail";
+
 export function renderAuthPage({
   brandEyebrow,
   brandTitle,
@@ -108,6 +110,9 @@ export function renderAuthPage({
       }
 
       storeAuthResponse(response);
+      if (mode === "login") {
+        rememberLoginPreference(form, email, password);
+      }
       if (typeof onAuthenticated === "function") {
         onAuthenticated(response);
         return;
@@ -260,12 +265,17 @@ function loginForm({ allowGoogleLogin = false } = {}) {
 
       <label>
         <span>Email <span class="required-marker" aria-label="required">*</span></span>
-        <input autocomplete="email" maxlength="320" name="email" placeholder="parent@example.com" required type="email" />
+        <input autocomplete="username" maxlength="320" name="email" placeholder="parent@example.com" required type="email" value="${escapeHtml(rememberedLoginEmail())}" />
       </label>
 
       <label>
         <span>Password <span class="required-marker" aria-label="required">*</span></span>
         <input autocomplete="current-password" maxlength="128" minlength="8" name="password" placeholder="At least 8 characters" required type="password" />
+      </label>
+
+      <label class="checkbox-option auth-remember-option">
+        <input name="rememberLogin" type="checkbox" ${rememberedLoginEmail() ? "checked" : ""} />
+        <span>Remember this login on this device</span>
       </label>
 
       <p class="message error" data-error hidden role="alert"></p>
@@ -476,6 +486,28 @@ function stateOptions() {
 
 function storeAuthResponse(response) {
   localStorage.setItem("schooldays.accessToken", response.accessToken);
+}
+
+function rememberedLoginEmail() {
+  return localStorage.getItem(REMEMBERED_LOGIN_EMAIL_KEY) || "";
+}
+
+function rememberLoginPreference(form, email, password) {
+  const rememberLogin = Boolean(form.querySelector("input[name='rememberLogin']")?.checked);
+  if (!rememberLogin) {
+    localStorage.removeItem(REMEMBERED_LOGIN_EMAIL_KEY);
+    return;
+  }
+
+  localStorage.setItem(REMEMBERED_LOGIN_EMAIL_KEY, email);
+  if (window.PasswordCredential && navigator.credentials?.store) {
+    const credential = new PasswordCredential({
+      id: email,
+      name: email,
+      password,
+    });
+    navigator.credentials.store(credential).catch(() => {});
+  }
 }
 
 function setLoading(submitButton, isLoading, loadingText = "Working") {
