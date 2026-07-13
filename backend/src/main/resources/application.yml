@@ -23,7 +23,7 @@ schooldays:
       current-key-id: ${SCHOOLDAYS_JWT_CURRENT_KEY_ID:primary}
       keys:
         primary: ${SCHOOLDAYS_JWT_SECRET}
-      access-token-ttl-minutes: ${SCHOOLDAYS_JWT_ACCESS_TOKEN_TTL_MINUTES:60}
+      access-token-ttl-minutes: ${SCHOOLDAYS_JWT_ACCESS_TOKEN_TTL_MINUTES:720}
     google:
       client-id: ${SCHOOLDAYS_GOOGLE_CLIENT_ID:${SCHOOLDAYS_GMAIL_CLIENT_ID:}}
       client-secret: ${SCHOOLDAYS_GOOGLE_CLIENT_SECRET:${SCHOOLDAYS_GMAIL_CLIENT_SECRET:}}
