@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -58,6 +59,7 @@ public class ExternalStudentImportService {
     private static final Field<OffsetDateTime> CREATED_AT = field(name("created_at"), OffsetDateTime.class);
 
     private final DSLContext dsl;
+    private final Map<ExternalStudentListCacheKey, ExternalStudentListResponse> studentListCache = new ConcurrentHashMap<>();
 
     public ExternalStudentImportService(DSLContext dsl) {
         this.dsl = dsl;
@@ -69,66 +71,87 @@ public class ExternalStudentImportService {
         }
 
         List<Map<String, String>> rows = readRows(file);
+        invalidateStudentListCache(tenantId);
         int importedCount = 0;
         int updatedCount = 0;
         int skippedCount = 0;
         List<String> errors = new ArrayList<>();
         OffsetDateTime now = OffsetDateTime.now();
 
-        for (int index = 0; index < rows.size(); index++) {
-            Map<String, String> row = rows.get(index);
-            int rowNumber = index + 2;
-            ExternalStudentRow student = ExternalStudentRow.from(row, rowNumber);
-            if (!student.isValid()) {
-                skippedCount++;
-                errors.add(student.errorMessage());
-                continue;
+        try {
+            for (int index = 0; index < rows.size(); index++) {
+                Map<String, String> row = rows.get(index);
+                int rowNumber = index + 2;
+                ExternalStudentRow student = ExternalStudentRow.from(row, rowNumber);
+                if (!student.isValid()) {
+                    skippedCount++;
+                    errors.add(student.errorMessage());
+                    continue;
+                }
+
+                boolean exists = dsl.fetchExists(selectOne()
+                        .from(EXTERNAL_STUDENTS)
+                        .where(TENANT_ID.eq(tenantId))
+                        .and(EXTERNAL_ID.eq(student.externalId())));
+
+                dsl.insertInto(EXTERNAL_STUDENTS)
+                        .columns(TENANT_ID, EXTERNAL_ID, STUDENT_NAME, GENDER, BIRTH_DATE, METADATA, CREATED_AT, UPDATED_AT)
+                        .values(
+                                tenantId,
+                                student.externalId(),
+                                student.studentName(),
+                                student.gender(),
+                                student.birthDate(),
+                                metadataFor(student),
+                                now,
+                                now
+                        )
+                        .onConflict(TENANT_ID, EXTERNAL_ID)
+                        .doUpdate()
+                        .set(STUDENT_NAME, student.studentName())
+                        .set(GENDER, student.gender())
+                        .set(BIRTH_DATE, student.birthDate())
+                        .set(METADATA, metadataFor(student))
+                        .set(UPDATED_AT, now)
+                        .execute();
+
+                if (exists) {
+                    updatedCount++;
+                } else {
+                    importedCount++;
+                }
             }
 
-            boolean exists = dsl.fetchExists(selectOne()
-                    .from(EXTERNAL_STUDENTS)
-                    .where(TENANT_ID.eq(tenantId))
-                    .and(EXTERNAL_ID.eq(student.externalId())));
-
-            dsl.insertInto(EXTERNAL_STUDENTS)
-                    .columns(TENANT_ID, EXTERNAL_ID, STUDENT_NAME, GENDER, BIRTH_DATE, METADATA, CREATED_AT, UPDATED_AT)
-                    .values(
-                            tenantId,
-                            student.externalId(),
-                            student.studentName(),
-                            student.gender(),
-                            student.birthDate(),
-                            metadataFor(student),
-                            now,
-                            now
-                    )
-                    .onConflict(TENANT_ID, EXTERNAL_ID)
-                    .doUpdate()
-                    .set(STUDENT_NAME, student.studentName())
-                    .set(GENDER, student.gender())
-                    .set(BIRTH_DATE, student.birthDate())
-                    .set(METADATA, metadataFor(student))
-                    .set(UPDATED_AT, now)
-                    .execute();
-
-            if (exists) {
-                updatedCount++;
-            } else {
-                importedCount++;
-            }
+            return new ExternalStudentImportResponse(
+                    "success",
+                    rows.size(),
+                    importedCount,
+                    updatedCount,
+                    skippedCount,
+                    errors
+            );
+        } finally {
+            invalidateStudentListCache(tenantId);
         }
-
-        return new ExternalStudentImportResponse(
-                "success",
-                rows.size(),
-                importedCount,
-                updatedCount,
-                skippedCount,
-                errors
-        );
     }
 
     public ExternalStudentListResponse listStudents(UUID tenantId) {
+        return studentListCache.computeIfAbsent(
+                new ExternalStudentListCacheKey(tenantId, null, null),
+                ignored -> fetchStudents(tenantId)
+        );
+    }
+
+    public ExternalStudentListResponse listStudents(UUID tenantId, int page, int pageSize) {
+        int safePage = Math.max(page, 1);
+        int safePageSize = Math.max(pageSize, 1);
+        return studentListCache.computeIfAbsent(
+                new ExternalStudentListCacheKey(tenantId, safePage, safePageSize),
+                ignored -> fetchStudents(tenantId, safePage, safePageSize)
+        );
+    }
+
+    private ExternalStudentListResponse fetchStudents(UUID tenantId) {
         List<ExternalStudentRowResponse> students = dsl.select(
                         EXTERNAL_ID,
                         STUDENT_NAME,
@@ -158,12 +181,10 @@ public class ExternalStudentImportService {
                 });
 
         long totalRows = students.size();
-        return new ExternalStudentListResponse(students, 1, (int) totalRows, totalRows, 1);
+        return new ExternalStudentListResponse(List.copyOf(students), 1, (int) totalRows, totalRows, 1);
     }
 
-    public ExternalStudentListResponse listStudents(UUID tenantId, int page, int pageSize) {
-        int safePage = Math.max(page, 1);
-        int safePageSize = Math.max(pageSize, 1);
+    private ExternalStudentListResponse fetchStudents(UUID tenantId, int safePage, int safePageSize) {
         long totalRows = dsl.selectCount()
                 .from(EXTERNAL_STUDENTS)
                 .where(TENANT_ID.eq(tenantId))
@@ -200,7 +221,11 @@ public class ExternalStudentImportService {
                             metadataText(metadataNode, "genderCode")
                     );
                 });
-        return new ExternalStudentListResponse(students, safePage, safePageSize, totalRows, totalPages);
+        return new ExternalStudentListResponse(List.copyOf(students), safePage, safePageSize, totalRows, totalPages);
+    }
+
+    private void invalidateStudentListCache(UUID tenantId) {
+        studentListCache.keySet().removeIf(key -> key.tenantId().equals(tenantId));
     }
 
     private List<Map<String, String>> readRows(MultipartFile file) {
@@ -316,6 +341,9 @@ public class ExternalStudentImportService {
 
     private String normalizeHeader(String header) {
         return header == null ? "" : header.trim();
+    }
+
+    private record ExternalStudentListCacheKey(UUID tenantId, Integer page, Integer pageSize) {
     }
 
     private record ExternalStudentRow(
