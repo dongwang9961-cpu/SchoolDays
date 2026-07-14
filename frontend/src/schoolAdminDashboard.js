@@ -318,6 +318,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let checkInStudentsTotalRows = 0;
   let checkInStudentsTotalPages = 1;
   let checkInStudentQrModal = null;
+  let externalStudentListLoadedFromBackend = false;
   let checkInTodayListOpen = false;
   let checkInTodayListLoading = false;
   let checkInTodayListRows = [];
@@ -366,6 +367,8 @@ let checkInScannerStatus = "Starting camera...";
 let checkInPeriodicRefreshTimer = null;
 const classListCache = new Map();
 const CLASS_LIST_CACHE_TTL_MS = 5000;
+const EXTERNAL_STUDENT_CACHE_VERSION = 1;
+const EXTERNAL_STUDENT_CACHE_PREFIX = "schooldays.externalStudents";
 const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
   if (role === "SCHOOL_ADMIN") {
@@ -1622,6 +1625,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   function handleLogout() {
     stopCheckInScanner();
     stopCheckInPeriodicRefresh();
+    invalidateExternalStudentListCache({ allTenants: true });
     onLogout();
   }
 
@@ -1652,9 +1656,14 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       checkInImportMessage = `Import complete: ${summaryParts.join(", ")}.`;
       checkInImportFile = null;
       updateCheckInImportFileLabel();
+      invalidateExternalStudentListCache();
       checkInStudents = [];
-      if (checkInStudentsOpen) {
-        await loadCheckInStudents();
+      checkInStudentsTotalRows = 0;
+      checkInStudentsPage = 1;
+      checkInStudentsPageSize = 25;
+      checkInStudentsTotalPages = 1;
+      if (checkInStudentsOpen || checkInQuickListOpen) {
+        await loadCheckInStudents({ force: true });
       }
     } catch (importError) {
       checkInImportMessage = "";
@@ -1762,7 +1771,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     checkInTodayListDate = quickCheckInDate();
     render();
     await Promise.all([
-      loadCheckInStudents(),
+      loadCheckInStudents({ force: true }),
       selectedClassId ? loadTodayCheckIns({ force: true }) : Promise.resolve(),
     ]);
   }
@@ -1972,30 +1981,132 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     return [selectedClassId || "", checkInTodayListDate || ""].join(":");
   }
 
-  async function loadCheckInStudents() {
+  function externalStudentCacheKey() {
+    return `${EXTERNAL_STUDENT_CACHE_PREFIX}:${school.tenantId}`;
+  }
+
+  function normalizeExternalStudentListResponse(response = {}) {
+    const students = Array.isArray(response.students) ? response.students : [];
+    const totalRows = Number.isFinite(Number(response.totalRows))
+      ? Number(response.totalRows)
+      : students.length;
+    const pageSize = Number.isFinite(Number(response.pageSize))
+      ? Number(response.pageSize)
+      : students.length || 25;
+    return {
+      students,
+      page: Number.isFinite(Number(response.page)) ? Number(response.page) : 1,
+      pageSize,
+      totalRows,
+      totalPages: Number.isFinite(Number(response.totalPages)) ? Number(response.totalPages) : 1,
+    };
+  }
+
+  function applyLoadedCheckInStudents(response = {}) {
+    const normalized = normalizeExternalStudentListResponse(response);
+    checkInStudents = normalized.students;
+    checkInStudentsTotalRows = normalized.totalRows;
+    checkInStudentsPage = normalized.page;
+    checkInStudentsPageSize = normalized.pageSize;
+    checkInStudentsTotalPages = normalized.totalPages;
+  }
+
+  function readExternalStudentListCache() {
+    try {
+      const rawValue = window.localStorage.getItem(externalStudentCacheKey());
+      if (!rawValue) {
+        return null;
+      }
+      const cached = JSON.parse(rawValue);
+      if (cached?.version !== EXTERNAL_STUDENT_CACHE_VERSION || !cached.response) {
+        return null;
+      }
+      return normalizeExternalStudentListResponse(cached.response);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function writeExternalStudentListCache(response = {}) {
+    try {
+      window.localStorage.setItem(externalStudentCacheKey(), JSON.stringify({
+        version: EXTERNAL_STUDENT_CACHE_VERSION,
+        loadedAt: Date.now(),
+        response: normalizeExternalStudentListResponse(response),
+      }));
+    } catch (_error) {
+      // Storage can fail in private browsing or when the imported list is too large.
+    }
+  }
+
+  function invalidateExternalStudentListCache({ allTenants = false } = {}) {
+    externalStudentListLoadedFromBackend = false;
+    try {
+      if (!allTenants) {
+        window.localStorage.removeItem(externalStudentCacheKey());
+        return;
+      }
+      const keys = [];
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (key?.startsWith(`${EXTERNAL_STUDENT_CACHE_PREFIX}:`)) {
+          keys.push(key);
+        }
+      }
+      keys.forEach((key) => window.localStorage.removeItem(key));
+    } catch (_error) {
+      // Ignore unavailable storage.
+    }
+  }
+
+  function hydrateCheckInStudentsFromCache() {
+    if (!externalStudentListLoadedFromBackend) {
+      return false;
+    }
+    if (checkInStudents.length) {
+      return true;
+    }
+    const cached = readExternalStudentListCache();
+    if (!cached) {
+      return false;
+    }
+    applyLoadedCheckInStudents(cached);
+    return true;
+  }
+
+  async function initializeCheckInStudentTables() {
+    if (checkInStudentsOpen && !checkInStudentsError) {
+      await initializeCheckInStudentsTabulator();
+    }
+    if (checkInQuickListOpen && !checkInStudentsError) {
+      await initializeQuickCheckInTabulator();
+    }
+  }
+
+  async function loadCheckInStudents({ force = false } = {}) {
     if (checkInStudentsLoading) {
+      return;
+    }
+    if (!force && hydrateCheckInStudentsFromCache()) {
+      checkInStudentsError = "";
+      render();
+      await initializeCheckInStudentTables();
       return;
     }
     checkInStudentsLoading = true;
     render();
     try {
       const response = await listExternalStudents({ tenantId: school.tenantId });
-      checkInStudents = response.students || [];
-      checkInStudentsTotalRows = response.totalRows || 0;
-      checkInStudentsPage = 1;
-      checkInStudentsPageSize = checkInStudents.length || 25;
-      checkInStudentsTotalPages = 1;
+      applyLoadedCheckInStudents(response);
+      writeExternalStudentListCache(response);
+      externalStudentListLoadedFromBackend = true;
+      checkInStudentsError = "";
     } catch (loadError) {
       checkInStudentsError = loadError instanceof Error ? loadError.message : "Students could not be loaded.";
     } finally {
       checkInStudentsLoading = false;
       render();
-      if (checkInStudentsOpen && !checkInStudentsError) {
-        await initializeCheckInStudentsTabulator();
-      }
-      if (checkInQuickListOpen && !checkInStudentsError) {
-        await initializeQuickCheckInTabulator();
-      }
+      await initializeCheckInStudentTables();
     }
   }
 
@@ -3340,6 +3451,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       return;
     }
 
+    hydrateCheckInStudentsFromCache();
     const matchedStudent = checkInStudents.find((student) => String(student.externalId || "").trim() === studentId) || null;
     await submitExternalStudentCheckIn({
       externalStudentId: studentId,
