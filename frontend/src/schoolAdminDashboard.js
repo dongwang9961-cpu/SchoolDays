@@ -2179,7 +2179,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
               <p class="check-in-selection-count" data-check-in-selection-count>${escapeHtml(`${checkInStudentsSelectedCount} student${checkInStudentsSelectedCount === 1 ? "" : "s"} selected.`)}</p>
             </div>
             <div class="check-in-students-actions">
-              <button class="secondary-button compact-button" data-check-in-students-print type="button" ${checkInStudentsLoading || !checkInStudentsTabulator ? "disabled" : ""}>Print student card</button>
+              <button class="secondary-button compact-button" data-check-in-students-print type="button" ${checkInStudentsLoading ? "disabled" : ""}>Print student card</button>
               <button class="secondary-button compact-button" data-check-in-students-close type="button">Close</button>
             </div>
           </div>
@@ -2437,10 +2437,28 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     checkInStudentsMessage = `Preparing ${selectedStudents.length} card${selectedStudents.length === 1 ? "" : "s"} for printing...`;
     render();
 
-    let printFrame;
+    let printRoot = null;
+    let printStyle = null;
+    let printWindow = null;
     try {
+      const usePrintWindow = shouldUseStudentCardPrintWindow();
+      if (usePrintWindow) {
+        printWindow = window.open("", "schooldays-student-cards-print", "width=1100,height=900");
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(`
+            <!doctype html>
+            <html>
+              <head><title>Student cards</title></head>
+              <body style="font-family: system-ui, sans-serif; margin: 24px;">Preparing student cards...</body>
+            </html>
+          `);
+          printWindow.document.close();
+        }
+      }
+
       const cards = await Promise.all(
-        selectedStudents.map((student) => createExternalStudentQrCard(student, 220)),
+        selectedStudents.map((student) => createExternalStudentQrCard(student, 160, { format: "svg" })),
       );
       const cardsPerPage = 6;
       const cardPages = [];
@@ -2448,128 +2466,181 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         cardPages.push(cards.slice(index, index + cardsPerPage));
       }
 
-      const styles = `
-        <style>
-          @page { size: auto; margin: 12mm; }
-          :root { color: #172033; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-          body { margin: 0; padding: 0; }
-          .sheet-page {
-            break-after: page;
+      const layoutStyles = `
+          [data-student-card-print-root] .student-card-sheet-page {
+            break-inside: avoid;
             display: grid;
-            gap: 14px;
+            gap: 4mm;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            grid-template-rows: repeat(3, minmax(0, 1fr));
-            min-height: calc(100vh - 24mm);
-            page-break-after: always;
+            grid-template-rows: repeat(3, 76mm);
+            page-break-inside: avoid;
           }
-          .sheet-page:last-child { break-after: auto; page-break-after: auto; }
-          .card { border: 1px solid #172033; border-radius: 10px; display: grid; gap: 12px; padding: 14px; break-inside: avoid; page-break-inside: avoid; }
-          .title { font-size: 1.1rem; font-weight: 900; margin: 0; }
-          .details { display: grid; gap: 6px; }
-          .detail { font-size: 0.95rem; line-height: 1.35; }
-          .detail strong { display: inline-block; min-width: 82px; }
-          .qr { align-items: center; display: flex; justify-content: center; }
-          .qr img { height: 160px; width: 160px; }
-        </style>
+          [data-student-card-print-root] .student-card-sheet-page + .student-card-sheet-page { break-before: page; page-break-before: always; }
+          [data-student-card-print-root] .student-card-print-card { border: 1px solid #172033; border-radius: 8px; display: grid; gap: 3mm; grid-template-rows: auto auto 1fr; padding: 4mm; break-inside: avoid; page-break-inside: avoid; }
+          [data-student-card-print-root] .student-card-print-title { font-size: 1.1rem; font-weight: 900; margin: 0; }
+          [data-student-card-print-root] .student-card-print-details { display: grid; gap: 6px; }
+          [data-student-card-print-root] .student-card-print-detail { font-size: 0.95rem; line-height: 1.35; }
+          [data-student-card-print-root] .student-card-print-detail strong { display: inline-block; min-width: 82px; }
+          [data-student-card-print-root] .student-card-print-qr { align-items: center; display: flex; justify-content: center; }
+          [data-student-card-print-root] .student-card-print-qr svg { display: block; height: 40mm; width: 40mm; }
+      `;
+      const printWindowStyles = `
+        @page { size: auto; margin: 12mm; }
+        body { margin: 0; padding: 0; }
+        [data-student-card-print-root] {
+          color: #172033;
+          display: block;
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        ${layoutStyles}
+      `;
+      const pageStyles = `
+        [data-student-card-print-root] { display: none; }
+        @media print {
+          @page { size: auto; margin: 12mm; }
+          body { margin: 0 !important; padding: 0 !important; }
+          body > :not([data-student-card-print-root]) { display: none !important; }
+          [data-student-card-print-root] {
+            color: #172033;
+            display: block !important;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          }
+          ${layoutStyles}
+        }
       `;
 
       const html = `
-        <!doctype html>
-        <html>
-          <head>
-            <title>Student cards</title>
-            ${styles}
-          </head>
-          <body>
-            ${cardPages
-              .map((pageCards, pageIndex) => `
-                <div class="sheet-page">
-                  ${pageCards
-                    .map(
-                      (card) => `
-                        <section class="card">
-                          <h1 class="title">${escapeHtml(card.displayName)}</h1>
-                          <div class="details">
-                            <div class="detail"><strong>Student ID</strong> ${escapeHtml(card.studentId || "-")}</div>
-                            <div class="detail"><strong>Gender</strong> ${escapeHtml(card.gender || "-")}</div>
-                          </div>
-                          <div class="qr"><img alt="QR code for ${escapeHtml(card.displayName)}" src="${card.qrDataUrl}" /></div>
-                        </section>
-                      `,
-                    )
-                    .join("")}
-                </div>
-              `)
-              .join("")}
-          </body>
-        </html>
+        ${cardPages
+          .map((pageCards) => `
+            <div class="student-card-sheet-page">
+              ${pageCards
+                .map(
+                  (card) => `
+                    <section class="student-card-print-card">
+                      <h1 class="student-card-print-title">${escapeHtml(card.displayName)}</h1>
+                      <div class="student-card-print-details">
+                        <div class="student-card-print-detail"><strong>Student ID</strong> ${escapeHtml(card.studentId || "-")}</div>
+                        <div class="student-card-print-detail"><strong>Gender</strong> ${escapeHtml(card.gender || "-")}</div>
+                      </div>
+                      <div class="student-card-print-qr" aria-label="QR code for ${escapeHtml(card.displayName)}">${card.qrSvg}</div>
+                    </section>
+                  `,
+                )
+                .join("")}
+            </div>
+          `)
+          .join("")}
       `;
 
-      printFrame = document.createElement("iframe");
-      printFrame.setAttribute("aria-hidden", "true");
-      printFrame.style.position = "fixed";
-      printFrame.style.width = "1px";
-      printFrame.style.height = "1px";
-      printFrame.style.border = "0";
-      printFrame.style.left = "-9999px";
-      printFrame.style.top = "0";
-      printFrame.style.opacity = "0";
-      document.body.appendChild(printFrame);
-
-      const frameWindow = printFrame.contentWindow;
-      const frameDocument = printFrame.contentDocument;
-      if (!frameWindow || !frameDocument) {
-        throw new Error("Student cards could not be prepared for printing.");
+      if (printWindow && !printWindow.closed) {
+        const printDocument = printWindow.document;
+        printDocument.open();
+        printDocument.write(`
+          <!doctype html>
+          <html>
+            <head>
+              <title>Student cards</title>
+              <style>${printWindowStyles}</style>
+            </head>
+            <body>
+              <div data-student-card-print-root>${html}</div>
+            </body>
+          </html>
+        `);
+        printDocument.close();
+        await printStudentCardsFromWindow(printWindow, { closeAfterPrint: true });
+        checkInStudentsMessage = `${selectedStudents.length} student card${selectedStudents.length === 1 ? "" : "s"} ready to print.`;
+        return;
       }
 
-      frameDocument.open();
-      frameDocument.write(html);
-      frameDocument.close();
+      printStyle = document.createElement("style");
+      printStyle.textContent = pageStyles;
+      document.head.appendChild(printStyle);
 
-      await new Promise((resolve, reject) => {
-        const finish = async () => {
-          try {
-            const images = Array.from(frameDocument.images || []);
-            await Promise.all(
-              images.map((image) =>
-                image.complete
-                  ? Promise.resolve()
-                  : new Promise((imageResolve, imageReject) => {
-                      image.addEventListener("load", imageResolve, { once: true });
-                      image.addEventListener("error", imageReject, { once: true });
-                    }),
-              ),
-            );
-            await new Promise((animationResolve) => frameWindow.requestAnimationFrame(() => frameWindow.requestAnimationFrame(animationResolve)));
-            const cleanup = () => {
-              frameWindow.removeEventListener("afterprint", cleanup);
-              if (printFrame && printFrame.parentNode) {
-                printFrame.parentNode.removeChild(printFrame);
-              }
-            };
-            frameWindow.addEventListener("afterprint", cleanup, { once: true });
-            frameWindow.focus();
-            frameWindow.print();
-            resolve();
-          } catch (error) {
-            reject(error);
-          }
-        };
+      printRoot = document.createElement("div");
+      printRoot.setAttribute("data-student-card-print-root", "");
+      printRoot.innerHTML = html;
+      document.body.appendChild(printRoot);
 
-        if (frameDocument.readyState === "complete") {
-          finish();
-        } else {
-          printFrame.addEventListener("load", finish, { once: true });
-        }
+      await new Promise((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
       });
+      const afterPrint = new Promise((resolve) => {
+        const fallback = window.setTimeout(resolve, 3000);
+        window.addEventListener("afterprint", () => {
+          window.clearTimeout(fallback);
+          resolve();
+        }, { once: true });
+      });
+      window.print();
+      await afterPrint;
 
       checkInStudentsMessage = `${selectedStudents.length} student card${selectedStudents.length === 1 ? "" : "s"} ready to print.`;
     } catch (printError) {
+      if (printWindow && !printWindow.closed) {
+        printWindow.close();
+      }
       checkInStudentsMessage = "";
       checkInStudentsError = printError instanceof Error ? printError.message : "Student cards could not be printed.";
     } finally {
+      if (printRoot?.parentNode) {
+        printRoot.parentNode.removeChild(printRoot);
+      }
+      if (printStyle?.parentNode) {
+        printStyle.parentNode.removeChild(printStyle);
+      }
       render();
     }
+  }
+
+  function shouldUseStudentCardPrintWindow() {
+    const userAgent = window.navigator?.userAgent || "";
+    const vendor = window.navigator?.vendor || "";
+    const platform = window.navigator?.platform || "";
+    const isIos = /iPhone|iPad|iPod/i.test(userAgent)
+      || (platform === "MacIntel" && Number(window.navigator?.maxTouchPoints || 0) > 1);
+    return /Safari/i.test(userAgent)
+      && /Apple Computer/i.test(vendor)
+      && !isIos
+      && !/Chrome|Chromium|CriOS|FxiOS|Edg|EdgiOS|OPR|OPiOS|Android/i.test(userAgent);
+  }
+
+  async function printStudentCardsFromWindow(printWindow, { closeAfterPrint = false } = {}) {
+    const printDocument = printWindow.document;
+    if (printDocument.readyState !== "complete") {
+      await new Promise((resolve) => {
+        printWindow.addEventListener("load", resolve, { once: true });
+      });
+    }
+    await new Promise((resolve) => {
+      const requestFrame = printWindow.requestAnimationFrame?.bind(printWindow) || window.requestAnimationFrame.bind(window);
+      requestFrame(() => requestFrame(resolve));
+    });
+    await new Promise((resolve, reject) => {
+      let resolved = false;
+      const finish = () => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        window.clearTimeout(fallback);
+        printWindow.removeEventListener("afterprint", finish);
+        if (closeAfterPrint && !printWindow.closed) {
+          printWindow.close();
+        }
+        resolve();
+      };
+      const fallback = window.setTimeout(finish, 3000);
+      printWindow.addEventListener("afterprint", finish, { once: true });
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch (error) {
+        window.clearTimeout(fallback);
+        printWindow.removeEventListener("afterprint", finish);
+        reject(error);
+      }
+    });
   }
 
   async function handleShowStudentQrCode(student) {
@@ -2592,7 +2663,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     render();
   }
 
-  async function createExternalStudentQrCard(student, width) {
+  async function createExternalStudentQrCard(student, width, { format = "dataUrl" } = {}) {
     const displayName = student.studentName || [student.firstName, student.lastName].filter(Boolean).join(" ") || "Student";
     const studentId = student.externalId || "";
     const gender = student.genderCode || "";
@@ -2601,6 +2672,15 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       name: displayName,
       gender,
     });
+    if (format === "svg") {
+      const qrSvg = await QRCode.toString(qrPayload, {
+        type: "svg",
+        errorCorrectionLevel: "M",
+        margin: 1,
+        width,
+      });
+      return { displayName, studentId, gender, qrSvg };
+    }
     const qrDataUrl = await QRCode.toDataURL(qrPayload, {
       errorCorrectionLevel: "M",
       margin: 1,
