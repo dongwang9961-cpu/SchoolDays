@@ -16,7 +16,7 @@ schooldays:
   public-base-url: ${SCHOOLDAYS_PUBLIC_BASE_URL:http://localhost:8080}
   frontend-base-url: ${SCHOOLDAYS_FRONTEND_BASE_URL:http://localhost:5173}
   cors:
-    allowed-origins: ${SCHOOLDAYS_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:4173,https://www.schooldays.cc,https://schooldays.cc}
+    allowed-origins: ${SCHOOLDAYS_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:4173,https://www.schooldays.cc,https://schooldays.cc,https://*.schooldays.cc}
   security:
     jwt:
       issuer: ${SCHOOLDAYS_JWT_ISSUER:schooldays}

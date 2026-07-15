@@ -1045,6 +1045,7 @@ public class AuthService {
         return allowedReturnOrigins.stream()
                 .map(this::normalizeOrigin)
                 .filter(value -> !isBlank(value))
+                .filter(value -> !value.contains("*"))
                 .findFirst()
                 .orElse(frontendBaseUrl);
     }
@@ -1054,8 +1055,19 @@ public class AuthService {
             return false;
         }
         return allowedReturnOrigins.stream()
-                .map(this::normalizeOrigin)
-                .anyMatch(origin::equals);
+                .anyMatch(allowedOrigin -> originMatches(allowedOrigin, origin));
+    }
+
+    private boolean originMatches(String allowedOrigin, String origin) {
+        String normalizedAllowedOrigin = normalizeOrigin(allowedOrigin);
+        if (isBlank(normalizedAllowedOrigin)) {
+            return false;
+        }
+        if (normalizedAllowedOrigin.contains("*")) {
+            String regex = "\\Q" + normalizedAllowedOrigin.replace("*", "\\E[^.]+\\Q") + "\\E";
+            return origin.matches(regex);
+        }
+        return origin.equals(normalizedAllowedOrigin);
     }
 
     private String normalizeOrigin(String value) {
@@ -1064,11 +1076,15 @@ public class AuthService {
         }
         try {
             URI uri = URI.create(stripTrailingSlash(value.trim()));
-            if (isBlank(uri.getScheme()) || isBlank(uri.getHost())) {
+            String host = uri.getHost();
+            if (isBlank(host) && uri.getAuthority() != null && uri.getAuthority().contains("*")) {
+                host = uri.getAuthority();
+            }
+            if (isBlank(uri.getScheme()) || isBlank(host)) {
                 return "";
             }
             int port = uri.getPort();
-            return uri.getScheme() + "://" + uri.getHost() + (port >= 0 ? ":" + port : "");
+            return uri.getScheme() + "://" + host + (port >= 0 && !host.contains(":") ? ":" + port : "");
         } catch (IllegalArgumentException exception) {
             return "";
         }

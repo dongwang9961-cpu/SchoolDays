@@ -219,7 +219,9 @@ function resolveApiBaseUrl() {
   if (configured) {
     return configured;
   }
-  if (window.location.hostname === "www.schooldays.cc" || window.location.hostname === "schooldays.cc") {
+  if (window.location.hostname === "www.schooldays.cc"
+    || window.location.hostname === "schooldays.cc"
+    || window.location.hostname.endsWith(".schooldays.cc")) {
     return "https://api.schooldays.cc";
   }
   return "";

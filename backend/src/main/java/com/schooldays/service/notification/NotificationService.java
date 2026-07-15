@@ -186,13 +186,59 @@ public class NotificationService {
         try {
             URI uri = URI.create(returnUrl);
             String origin = uri.getScheme() + "://" + uri.getAuthority();
-            if (uri.getScheme() == null || uri.getAuthority() == null || !allowedReturnOrigins.contains(origin)) {
+            if (uri.getScheme() == null || uri.getAuthority() == null || !isAllowedReturnOrigin(origin)) {
                 return "";
             }
             return uri.toString();
         } catch (IllegalArgumentException exception) {
             return "";
         }
+    }
+
+    private boolean isAllowedReturnOrigin(String origin) {
+        if (isBlank(origin)) {
+            return false;
+        }
+        return allowedReturnOrigins.stream().anyMatch(allowedOrigin -> originMatches(allowedOrigin, origin));
+    }
+
+    private boolean originMatches(String allowedOrigin, String origin) {
+        String normalizedAllowedOrigin = normalizeOrigin(allowedOrigin);
+        if (isBlank(normalizedAllowedOrigin)) {
+            return false;
+        }
+        if (normalizedAllowedOrigin.contains("*")) {
+            String regex = "\\Q" + normalizedAllowedOrigin.replace("*", "\\E[^.]+\\Q") + "\\E";
+            return origin.matches(regex);
+        }
+        return origin.equals(normalizedAllowedOrigin);
+    }
+
+    private String normalizeOrigin(String value) {
+        if (isBlank(value)) {
+            return "";
+        }
+        try {
+            URI uri = URI.create(stripTrailingSlash(value.trim()));
+            String host = uri.getHost();
+            if (isBlank(host) && uri.getAuthority() != null && uri.getAuthority().contains("*")) {
+                host = uri.getAuthority();
+            }
+            if (isBlank(uri.getScheme()) || isBlank(host)) {
+                return "";
+            }
+            int port = uri.getPort();
+            return uri.getScheme() + "://" + host + (port >= 0 && !host.contains(":") ? ":" + port : "");
+        } catch (IllegalArgumentException exception) {
+            return "";
+        }
+    }
+
+    private String stripTrailingSlash(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
     private void requireSender(UUID tenantId, UUID userId) {

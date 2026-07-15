@@ -9,7 +9,7 @@ import "./styles.css";
 
 const urlParams = new URLSearchParams(window.location.search);
 consumeAccessTokenHash();
-const schoolRoute = getSchoolRouteFromPath(window.location.pathname);
+const schoolRoute = getSchoolRoute();
 const schoolSlug = schoolRoute.slug;
 const schoolLookup = schoolSlug ? await loadSchool(schoolSlug) : { school: null, error: null };
 const school = schoolLookup.school;
@@ -83,6 +83,16 @@ function authenticatedPortalUrl() {
   return url.pathname + url.search + url.hash;
 }
 
+function getSchoolRoute() {
+  const subdomainSlug = schoolSlugFromSubdomain(window.location.hostname);
+  if (subdomainSlug) {
+    const segments = window.location.pathname.split("/").filter(Boolean);
+    const portal = segments[0] === "t" ? "teacher" : segments[0] === "admin" ? "admin" : "parent";
+    return { slug: subdomainSlug, portal };
+  }
+  return getSchoolRouteFromPath(window.location.pathname);
+}
+
 function getSchoolRouteFromPath(pathname) {
   const segments = pathname.split("/").filter(Boolean);
   if (segments[0] !== "school" || !segments[1]) {
@@ -90,6 +100,19 @@ function getSchoolRouteFromPath(pathname) {
   }
   const portal = segments[2] === "t" ? "teacher" : segments[2] === "admin" ? "admin" : "parent";
   return { slug: segments[1].toLowerCase(), portal };
+}
+
+function schoolSlugFromSubdomain(hostname) {
+  const normalizedHost = String(hostname || "").toLowerCase();
+  const suffix = ".schooldays.cc";
+  if (!normalizedHost.endsWith(suffix)) {
+    return "";
+  }
+  const subdomain = normalizedHost.slice(0, -suffix.length);
+  if (!subdomain || ["www", "api"].includes(subdomain) || subdomain.includes(".")) {
+    return "";
+  }
+  return subdomain;
 }
 
 async function loadSchool(slug) {

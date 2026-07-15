@@ -1,7 +1,7 @@
 import { contextNote, renderAuthPage } from "./authPage.js";
 import "./styles.css";
 
-if (window.location.pathname.startsWith("/school/")) {
+if (isSchoolEntryPoint()) {
   await import("./school.js");
 } else {
   const urlParams = new URLSearchParams(window.location.search);
@@ -21,4 +21,21 @@ if (window.location.pathname.startsWith("/school/")) {
       : [{ value: "login", label: "Sign in" }],
     tenantId: "",
   });
+}
+
+function isSchoolEntryPoint() {
+  return window.location.pathname.startsWith("/school/") || Boolean(schoolSlugFromSubdomain());
+}
+
+function schoolSlugFromSubdomain() {
+  const hostname = window.location.hostname.toLowerCase();
+  const suffix = ".schooldays.cc";
+  if (!hostname.endsWith(suffix)) {
+    return "";
+  }
+  const subdomain = hostname.slice(0, -suffix.length);
+  if (!subdomain || ["www", "api"].includes(subdomain) || subdomain.includes(".")) {
+    return "";
+  }
+  return subdomain;
 }
