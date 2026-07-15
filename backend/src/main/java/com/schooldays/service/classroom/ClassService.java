@@ -20,8 +20,10 @@ import com.schooldays.dto.classroom.ClassResponse;
 import com.schooldays.dto.classroom.CreateClassRequest;
 import com.schooldays.dto.classroom.UpdateClassRequest;
 import com.schooldays.jooq.generated.tables.records.ClassesRecord;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -35,15 +37,42 @@ public class ClassService {
 
     private final DSLContext dsl;
     private final ClassDao classDao;
+    private final SchoolDataCacheService cacheService;
 
-    public ClassService(DSLContext dsl, ClassDao classDao) {
+    @Autowired
+    public ClassService(DSLContext dsl, ClassDao classDao, SchoolDataCacheService cacheService) {
         this.dsl = dsl;
         this.classDao = classDao;
+        this.cacheService = cacheService;
+    }
+
+    ClassService(DSLContext dsl, ClassDao classDao) {
+        this(dsl, classDao, new SchoolDataCacheService());
     }
 
     public ClassListResponse listClasses(UUID tenantId, UUID siteId) {
-        requireTenant(tenantId);
-        requireSite(tenantId, siteId);
+        return cacheService.getClassList(tenantId, siteId, () -> {
+            requireTenant(tenantId);
+            requireSite(tenantId, siteId);
+            return fetchClasses(tenantId, siteId);
+        });
+    }
+
+    public ClassListResponse listAvailableClasses(UUID tenantId) {
+        return cacheService.getAvailableClassList(tenantId, () -> {
+            requireTenant(tenantId);
+            return fetchAvailableClasses(tenantId);
+        });
+    }
+
+    public ClassListResponse listTeacherClasses(UUID tenantId, UUID teacherUserId) {
+        return cacheService.getTeacherClassList(tenantId, teacherUserId, () -> {
+            requireTenant(tenantId);
+            return fetchTeacherClasses(tenantId, teacherUserId);
+        });
+    }
+
+    private ClassListResponse fetchClasses(UUID tenantId, UUID siteId) {
         List<ClassResponse> classes = classDao.findByTenantAndSite(tenantId, siteId)
                 .stream()
                 .map(ClassResponse::from)
@@ -51,8 +80,7 @@ public class ClassService {
         return new ClassListResponse(classes);
     }
 
-    public ClassListResponse listAvailableClasses(UUID tenantId) {
-        requireTenant(tenantId);
+    private ClassListResponse fetchAvailableClasses(UUID tenantId) {
         List<ClassResponse> classes = classDao.findActiveByTenant(tenantId)
                 .stream()
                 .map(ClassResponse::from)
@@ -60,8 +88,7 @@ public class ClassService {
         return new ClassListResponse(classes);
     }
 
-    public ClassListResponse listTeacherClasses(UUID tenantId, UUID teacherUserId) {
-        requireTenant(tenantId);
+    private ClassListResponse fetchTeacherClasses(UUID tenantId, UUID teacherUserId) {
         List<ClassResponse> classes = dsl.select(CLASSES.fields())
                 .from(CLASSES)
                 .join(TEACHER_ASSIGNMENTS).on(TEACHER_ASSIGNMENTS.CLASS_ID.eq(CLASSES.ID))
@@ -104,6 +131,7 @@ public class ClassService {
                 ))
                 .setCreatedAt(now)
                 .setUpdatedAt(now));
+        invalidateClassDependentCaches(tenantId);
         return ClassResponse.from(saved);
     }
 
@@ -140,7 +168,9 @@ public class ClassService {
         ));
         record.setUpdatedAt(OffsetDateTime.now());
         record.changed(true);
-        return ClassResponse.from(classDao.save(record));
+        ClassesRecord saved = classDao.save(record);
+        invalidateClassDependentCaches(tenantId);
+        return ClassResponse.from(saved);
     }
 
     public ClassResponse closeEnrollment(UUID tenantId, UUID classId) {
@@ -149,7 +179,9 @@ public class ClassService {
         record.setRegistrationClosesAt(OffsetDateTime.now());
         record.setUpdatedAt(OffsetDateTime.now());
         record.changed(true);
-        return ClassResponse.from(classDao.save(record));
+        ClassesRecord saved = classDao.save(record);
+        invalidateClassDependentCaches(tenantId);
+        return ClassResponse.from(saved);
     }
 
     public ClassResponse stopClass(UUID tenantId, UUID classId) {
@@ -159,7 +191,15 @@ public class ClassService {
         record.setRegistrationClosesAt(OffsetDateTime.now());
         record.setUpdatedAt(OffsetDateTime.now());
         record.changed(true);
-        return ClassResponse.from(classDao.save(record));
+        ClassesRecord saved = classDao.save(record);
+        invalidateClassDependentCaches(tenantId);
+        return ClassResponse.from(saved);
+    }
+
+    private void invalidateClassDependentCaches(UUID tenantId) {
+        cacheService.clearClassCaches(tenantId);
+        cacheService.clearAttendanceCaches(tenantId);
+        cacheService.clearExternalCheckInCaches(tenantId);
     }
 
     private void requireTenant(UUID tenantId) {

@@ -49,6 +49,7 @@ import com.schooldays.entities.auth.RegistrationLinkRow;
 import com.schooldays.entities.auth.TeacherInvitationRow;
 import com.schooldays.entities.auth.TenantInvitationRow;
 import com.schooldays.entities.auth.UserAuthRow;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import com.schooldays.service.email.SystemEmailMessage;
 import com.schooldays.service.email.SystemEmailService;
 import org.jooq.DSLContext;
@@ -90,6 +91,7 @@ public class AuthService {
     private final UserIdentityDao userIdentityDao;
     private final RoleDao roleDao;
     private final DSLContext dsl;
+    private final SchoolDataCacheService cacheService;
     private final SecureTokenGenerator tokenGenerator;
     private final GoogleOAuthStateService googleOAuthStateService;
     private final SystemEmailService systemEmailService;
@@ -117,6 +119,7 @@ public class AuthService {
             UserIdentityDao userIdentityDao,
             RoleDao roleDao,
             DSLContext dsl,
+            SchoolDataCacheService cacheService,
             SecureTokenGenerator tokenGenerator,
             GoogleOAuthStateService googleOAuthStateService,
             SystemEmailService systemEmailService,
@@ -142,6 +145,7 @@ public class AuthService {
         this.userIdentityDao = userIdentityDao;
         this.roleDao = roleDao;
         this.dsl = dsl;
+        this.cacheService = cacheService;
         this.tokenGenerator = tokenGenerator;
         this.googleOAuthStateService = googleOAuthStateService;
         this.systemEmailService = systemEmailService;
@@ -463,9 +467,13 @@ public class AuthService {
             dsl.deleteFrom(USERS)
                     .where(USERS.ID.eq(userId))
                     .execute();
+            cacheService.clearAll();
             return new EndpointStatusResponse("success", "DELETE /api/tenants/{tenantId}/users", "User archived and removed from the system.");
         }
 
+        cacheService.clearClassCaches(tenantId);
+        cacheService.clearAttendanceCaches(tenantId);
+        cacheService.clearExternalCheckInCaches(tenantId);
         return new EndpointStatusResponse("success", "DELETE /api/tenants/{tenantId}/users", "User removed from this school.");
     }
 
@@ -991,6 +999,7 @@ public class AuthService {
                 .onConflict(TEACHER_ASSIGNMENTS.CLASS_ID, TEACHER_ASSIGNMENTS.TEACHER_USER_ID)
                 .doNothing()
                 .execute();
+        cacheService.clearClassCaches(tenantId);
     }
 
     private String registrationLinkPurpose(String intendedRole) {

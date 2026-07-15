@@ -14,7 +14,9 @@ import com.schooldays.dto.teacher.AssignTeacherRequest;
 import com.schooldays.dto.teacher.ClassTeacherListResponse;
 import com.schooldays.dto.teacher.ClassTeacherResponse;
 import com.schooldays.service.auth.EmailNormalizer;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import org.jooq.DSLContext;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -25,11 +27,18 @@ public class TeacherAssignmentService {
     private final DSLContext dsl;
     private final UserDao userDao;
     private final RoleDao roleDao;
+    private final SchoolDataCacheService cacheService;
 
-    public TeacherAssignmentService(DSLContext dsl, UserDao userDao, RoleDao roleDao) {
+    @Autowired
+    public TeacherAssignmentService(DSLContext dsl, UserDao userDao, RoleDao roleDao, SchoolDataCacheService cacheService) {
         this.dsl = dsl;
         this.userDao = userDao;
         this.roleDao = roleDao;
+        this.cacheService = cacheService;
+    }
+
+    TeacherAssignmentService(DSLContext dsl, UserDao userDao, RoleDao roleDao) {
+        this(dsl, userDao, roleDao, new SchoolDataCacheService());
     }
 
     public ClassTeacherListResponse listClassTeachers(UUID tenantId, UUID classId) {
@@ -68,6 +77,7 @@ public class TeacherAssignmentService {
                 .onConflict(TEACHER_ASSIGNMENTS.CLASS_ID, TEACHER_ASSIGNMENTS.TEACHER_USER_ID)
                 .doNothing()
                 .execute();
+        cacheService.clearClassCaches(tenantId);
 
         return teacherAssignment(classId, teacherUserId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Teacher assignment could not be loaded"));

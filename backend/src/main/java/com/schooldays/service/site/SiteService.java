@@ -15,9 +15,11 @@ import com.schooldays.dto.site.SiteQuotaResponse;
 import com.schooldays.dto.site.SiteResponse;
 import com.schooldays.dto.site.UpdateSiteRequest;
 import com.schooldays.jooq.generated.tables.records.TenantsRecord;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
 import org.jooq.impl.DSL;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -29,9 +31,16 @@ public class SiteService {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final DSLContext dsl;
+    private final SchoolDataCacheService cacheService;
 
-    public SiteService(DSLContext dsl) {
+    @Autowired
+    public SiteService(DSLContext dsl, SchoolDataCacheService cacheService) {
         this.dsl = dsl;
+        this.cacheService = cacheService;
+    }
+
+    SiteService(DSLContext dsl) {
+        this(dsl, new SchoolDataCacheService());
     }
 
     public SiteListResponse listSites(UUID tenantId) {
@@ -67,6 +76,7 @@ public class SiteService {
         if (record == null) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Site could not be created");
         }
+        cacheService.clearClassCaches(tenantId);
         return SiteResponse.from(record);
     }
 
@@ -92,6 +102,7 @@ public class SiteService {
         record.setMetadata(metadataFor(request, record.getMetadata()));
         record.setUpdatedAt(OffsetDateTime.now());
         record.store();
+        cacheService.clearClassCaches(tenantId);
         return SiteResponse.from(record);
     }
 

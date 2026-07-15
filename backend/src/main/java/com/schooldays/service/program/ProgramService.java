@@ -16,8 +16,10 @@ import com.schooldays.dto.program.ProgramListResponse;
 import com.schooldays.dto.program.ProgramResponse;
 import com.schooldays.dto.program.UpdateProgramRequest;
 import com.schooldays.jooq.generated.tables.records.ProgramsRecord;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -29,10 +31,17 @@ public class ProgramService {
 
     private final DSLContext dsl;
     private final ProgramDao programDao;
+    private final SchoolDataCacheService cacheService;
 
-    public ProgramService(DSLContext dsl, ProgramDao programDao) {
+    @Autowired
+    public ProgramService(DSLContext dsl, ProgramDao programDao, SchoolDataCacheService cacheService) {
         this.dsl = dsl;
         this.programDao = programDao;
+        this.cacheService = cacheService;
+    }
+
+    ProgramService(DSLContext dsl, ProgramDao programDao) {
+        this(dsl, programDao, new SchoolDataCacheService());
     }
 
     public ProgramListResponse listPrograms(UUID tenantId, UUID siteId) {
@@ -59,6 +68,7 @@ public class ProgramService {
                 .setMetadata(metadataFor(request.description(), request.startDate(), request.endDate()))
                 .setCreatedAt(now)
                 .setUpdatedAt(now));
+        cacheService.clearClassCaches(tenantId);
         return ProgramResponse.from(saved);
     }
 
@@ -79,7 +89,9 @@ public class ProgramService {
         record.setMetadata(metadataFor(description, startDate, endDate));
         record.setUpdatedAt(OffsetDateTime.now());
         record.changed(true);
-        return ProgramResponse.from(programDao.save(record));
+        ProgramsRecord saved = programDao.save(record);
+        cacheService.clearClassCaches(tenantId);
+        return ProgramResponse.from(saved);
     }
 
     private void requireTenant(UUID tenantId) {

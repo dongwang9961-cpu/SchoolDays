@@ -28,6 +28,7 @@ import com.schooldays.dto.attendance.AttendanceResponse;
 import com.schooldays.dto.classroom.ClassResponse;
 import com.schooldays.jooq.generated.tables.records.AttendanceRecord;
 import com.schooldays.jooq.generated.tables.records.ClassesRecord;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import org.jooq.Record;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -48,15 +49,21 @@ public class AttendanceService {
 
     private final AttendanceDao attendanceDao;
     private final Clock clock;
+    private final SchoolDataCacheService cacheService;
 
     @Autowired
-    public AttendanceService(AttendanceDao attendanceDao) {
-        this(attendanceDao, Clock.systemDefaultZone());
+    public AttendanceService(AttendanceDao attendanceDao, SchoolDataCacheService cacheService) {
+        this(attendanceDao, Clock.systemDefaultZone(), cacheService);
     }
 
     AttendanceService(AttendanceDao attendanceDao, Clock clock) {
+        this(attendanceDao, clock, new SchoolDataCacheService());
+    }
+
+    AttendanceService(AttendanceDao attendanceDao, Clock clock, SchoolDataCacheService cacheService) {
         this.attendanceDao = attendanceDao;
         this.clock = clock;
+        this.cacheService = cacheService;
     }
 
     @Transactional
@@ -80,6 +87,7 @@ public class AttendanceService {
                 "PARENT",
                 OffsetDateTime.now()
         );
+        cacheService.clearAttendanceCaches(request.tenantId());
         return listParentChildAttendance(request.tenantId(), parentUserId, request.childId()).attendance().stream()
                 .filter(entry -> entry.classId().equals(request.classId()) && entry.classDate().equals(request.classDate()))
                 .findFirst()
@@ -112,6 +120,10 @@ public class AttendanceService {
 
     @Transactional(readOnly = true)
     public AttendanceListResponse listParentAttendance(UUID tenantId, UUID parentUserId) {
+        return cacheService.getParentAttendance(tenantId, parentUserId, () -> fetchParentAttendance(tenantId, parentUserId));
+    }
+
+    private AttendanceListResponse fetchParentAttendance(UUID tenantId, UUID parentUserId) {
         List<AttendanceResponse> attendance = attendanceDao.listParentAttendance(tenantId, parentUserId).stream()
                 .map(AttendanceResponse::from)
                 .toList();
@@ -120,6 +132,15 @@ public class AttendanceService {
 
     @Transactional(readOnly = true)
     public AttendanceListResponse listParentChildAttendance(UUID tenantId, UUID parentUserId, UUID childId) {
+        return cacheService.getParentChildAttendance(
+                tenantId,
+                parentUserId,
+                childId,
+                () -> fetchParentChildAttendance(tenantId, parentUserId, childId)
+        );
+    }
+
+    private AttendanceListResponse fetchParentChildAttendance(UUID tenantId, UUID parentUserId, UUID childId) {
         attendanceDao.findParentChild(tenantId, parentUserId, childId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Child does not belong to this parent"));
         List<AttendanceResponse> attendance = attendanceDao.listParentChildAttendance(tenantId, parentUserId, childId).stream()
@@ -130,6 +151,10 @@ public class AttendanceService {
 
     @Transactional(readOnly = true)
     public AttendanceListResponse listClassAttendance(UUID classId, LocalDate classDate) {
+        return cacheService.getClassAttendance(classId, classDate, () -> fetchClassAttendance(classId, classDate));
+    }
+
+    private AttendanceListResponse fetchClassAttendance(UUID classId, LocalDate classDate) {
         if (attendanceDao.findActiveClassById(classId).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found");
         }
@@ -141,6 +166,10 @@ public class AttendanceService {
 
     @Transactional(readOnly = true)
     public AttendanceGridResponse getClassAttendanceGrid(UUID tenantId, UUID classId) {
+        return cacheService.getClassAttendanceGrid(tenantId, classId, () -> fetchClassAttendanceGrid(tenantId, classId));
+    }
+
+    private AttendanceGridResponse fetchClassAttendanceGrid(UUID tenantId, UUID classId) {
         ClassesRecord classRecord = attendanceDao.findClass(tenantId, classId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found"));
         List<AttendanceGridDateResponse> dates = classDates(classRecord);

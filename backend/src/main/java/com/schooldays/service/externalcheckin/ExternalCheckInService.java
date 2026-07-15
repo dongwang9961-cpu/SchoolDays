@@ -20,11 +20,13 @@ import com.schooldays.dto.externalcheckin.ExternalCheckInDateCountResponse;
 import com.schooldays.dto.externalcheckin.ExternalCheckInRequest;
 import com.schooldays.dto.externalcheckin.ExternalCheckInResponse;
 import com.schooldays.dto.externalcheckin.ExternalCheckInRowResponse;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import org.jooq.DSLContext;
 import org.jooq.Field;
 import org.jooq.JSONB;
 import org.jooq.Record;
 import org.jooq.Table;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,9 +62,16 @@ public class ExternalCheckInService {
     private static final Field<UUID> EXTERNAL_STUDENTS_ID = field(name("id"), UUID.class);
 
     private final DSLContext dsl;
+    private final SchoolDataCacheService cacheService;
 
-    public ExternalCheckInService(DSLContext dsl) {
+    @Autowired
+    public ExternalCheckInService(DSLContext dsl, SchoolDataCacheService cacheService) {
         this.dsl = dsl;
+        this.cacheService = cacheService;
+    }
+
+    ExternalCheckInService(DSLContext dsl) {
+        this(dsl, new SchoolDataCacheService());
     }
 
     @Transactional
@@ -117,6 +126,7 @@ public class ExternalCheckInService {
         if (inserted == 0) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This student has already checked in for the selected class and date");
         }
+        cacheService.clearExternalCheckInCaches(tenantId);
 
         Record record = dsl.select(
                         ID,
@@ -169,10 +179,22 @@ public class ExternalCheckInService {
         if (checkDate == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "checkDate is required");
         }
-        ClassesRecord classRecord = ensureClassExists(tenantId, classId);
-        ensureCheckInPermission(tenantId, classId, checkedInByUserId, checkedInByRole);
-        ensureScheduledClassDate(classRecord, checkDate);
+        return cacheService.getExternalCheckInList(
+                tenantId,
+                classId,
+                checkDate,
+                checkedInByUserId,
+                checkedInByRole,
+                () -> {
+                    ClassesRecord classRecord = ensureClassExists(tenantId, classId);
+                    ensureCheckInPermission(tenantId, classId, checkedInByUserId, checkedInByRole);
+                    ensureScheduledClassDate(classRecord, checkDate);
+                    return fetchCheckIns(tenantId, classId, checkDate);
+                }
+        );
+    }
 
+    private ExternalCheckInListResponse fetchCheckIns(UUID tenantId, UUID classId, LocalDate checkDate) {
         var e = table(name("external_check_ins")).as("e");
         var s = table(name("external_students")).as("s");
         var c = table(name("classes")).as("c");
@@ -243,10 +265,28 @@ public class ExternalCheckInService {
         if (endDate.isBefore(startDate)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "endDate must be on or after startDate");
         }
-        ClassesRecord classRecord = ensureClassExists(tenantId, classId);
-        ensureCheckInPermission(tenantId, classId, checkedInByUserId, checkedInByRole);
-        ensureDateRangeWithinClass(classRecord, startDate, endDate);
+        return cacheService.getExternalCheckInCounts(
+                tenantId,
+                classId,
+                startDate,
+                endDate,
+                checkedInByUserId,
+                checkedInByRole,
+                () -> {
+                    ClassesRecord classRecord = ensureClassExists(tenantId, classId);
+                    ensureCheckInPermission(tenantId, classId, checkedInByUserId, checkedInByRole);
+                    ensureDateRangeWithinClass(classRecord, startDate, endDate);
+                    return fetchCheckInCounts(tenantId, classId, startDate, endDate);
+                }
+        );
+    }
 
+    private List<ExternalCheckInDateCountResponse> fetchCheckInCounts(
+            UUID tenantId,
+            UUID classId,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {
         return dsl.select(CHECK_DATE, count().as("check_in_count"))
                 .from(EXTERNAL_CHECK_INS)
                 .where(TENANT_ID.eq(tenantId))

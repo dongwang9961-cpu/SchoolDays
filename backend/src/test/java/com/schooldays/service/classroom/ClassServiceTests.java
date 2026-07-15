@@ -150,5 +150,9 @@ class ClassServiceTests {
         assertThat(updated.startTime()).isEqualTo(LocalTime.parse("13:00"));
         assertThat(updated.endTime()).isEqualTo(LocalTime.parse("15:00"));
         assertThat(updated.updatedAt()).isAfterOrEqualTo(created.updatedAt());
+        assertThat(classService.listClasses(tenantId, siteId).classes())
+                .singleElement()
+                .extracting("name")
+                .isEqualTo("Intermediate Drawing");
     }
 }

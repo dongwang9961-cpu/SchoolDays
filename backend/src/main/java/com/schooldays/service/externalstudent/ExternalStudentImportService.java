@@ -27,6 +27,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.schooldays.dto.externalstudent.ExternalStudentListResponse;
 import com.schooldays.dto.externalstudent.ExternalStudentImportResponse;
 import com.schooldays.dto.externalstudent.ExternalStudentRowResponse;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -38,6 +39,7 @@ import org.jooq.DSLContext;
 import org.jooq.Field;
 import org.jooq.JSONB;
 import org.jooq.Table;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -59,10 +61,17 @@ public class ExternalStudentImportService {
     private static final Field<OffsetDateTime> CREATED_AT = field(name("created_at"), OffsetDateTime.class);
 
     private final DSLContext dsl;
+    private final SchoolDataCacheService cacheService;
     private final Map<ExternalStudentListCacheKey, ExternalStudentListResponse> studentListCache = new ConcurrentHashMap<>();
 
-    public ExternalStudentImportService(DSLContext dsl) {
+    @Autowired
+    public ExternalStudentImportService(DSLContext dsl, SchoolDataCacheService cacheService) {
         this.dsl = dsl;
+        this.cacheService = cacheService;
+    }
+
+    ExternalStudentImportService(DSLContext dsl) {
+        this(dsl, new SchoolDataCacheService());
     }
 
     public ExternalStudentImportResponse importStudents(UUID tenantId, MultipartFile file) {
@@ -72,6 +81,7 @@ public class ExternalStudentImportService {
 
         List<Map<String, String>> rows = readRows(file);
         invalidateStudentListCache(tenantId);
+        cacheService.clearExternalCheckInCaches(tenantId);
         int importedCount = 0;
         int updatedCount = 0;
         int skippedCount = 0;
@@ -132,6 +142,7 @@ public class ExternalStudentImportService {
             );
         } finally {
             invalidateStudentListCache(tenantId);
+            cacheService.clearExternalCheckInCaches(tenantId);
         }
     }
 

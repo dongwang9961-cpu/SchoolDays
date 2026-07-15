@@ -15,6 +15,8 @@ import com.schooldays.jooq.generated.tables.records.ClassFeeItemsRecord;
 import com.schooldays.jooq.generated.tables.records.ClassesRecord;
 import com.schooldays.jooq.generated.tables.records.ChildrenRecord;
 import com.schooldays.jooq.generated.tables.records.EnrollmentsRecord;
+import com.schooldays.service.cache.SchoolDataCacheService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,9 +26,16 @@ import org.springframework.web.server.ResponseStatusException;
 public class EnrollmentService {
 
     private final EnrollmentDao enrollmentDao;
+    private final SchoolDataCacheService cacheService;
 
-    public EnrollmentService(EnrollmentDao enrollmentDao) {
+    @Autowired
+    public EnrollmentService(EnrollmentDao enrollmentDao, SchoolDataCacheService cacheService) {
         this.enrollmentDao = enrollmentDao;
+        this.cacheService = cacheService;
+    }
+
+    EnrollmentService(EnrollmentDao enrollmentDao) {
+        this(enrollmentDao, new SchoolDataCacheService());
     }
 
     @Transactional(readOnly = true)
@@ -106,6 +115,7 @@ public class EnrollmentService {
                 })
                 .toList();
 
+        cacheService.clearAttendanceCaches(tenantId);
         return new CreateEnrollmentResponse(responses, requiredFeeTotal > 0, requiredFeeTotal, currency);
     }
 }

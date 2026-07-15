@@ -147,6 +147,8 @@ class AttendanceServiceTests {
 
     @Test
     void parentCanCheckInAndReviewAttendanceHistory() {
+        assertThat(attendanceService.listParentAttendance(tenantId, parentUserId).attendance()).isEmpty();
+
         var response = attendanceService.parentCheckIn(
                 parentUserId,
                 new AttendanceCheckInRequest(tenantId, childId, classId, LocalDate.parse("2026-07-15"))
@@ -169,6 +171,14 @@ class AttendanceServiceTests {
 
     @Test
     void classAttendanceGridIncludesRosterDatesAndCheckIns() {
+        assertThat(attendanceService.getClassAttendanceGrid(tenantId, classId).students())
+                .singleElement()
+                .satisfies(student -> assertThat(student.attendance())
+                        .filteredOn(cell -> cell.classDate().equals(LocalDate.parse("2026-07-15")))
+                        .singleElement()
+                        .extracting("checkedIn")
+                        .isEqualTo(false));
+
         attendanceService.parentCheckIn(
                 parentUserId,
                 new AttendanceCheckInRequest(tenantId, childId, classId, LocalDate.parse("2026-07-15"))

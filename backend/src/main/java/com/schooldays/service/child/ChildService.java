@@ -13,7 +13,9 @@ import com.schooldays.dto.child.ChildListResponse;
 import com.schooldays.dto.child.ChildRequest;
 import com.schooldays.dto.child.ChildResponse;
 import com.schooldays.jooq.generated.tables.records.ChildrenRecord;
+import com.schooldays.service.cache.SchoolDataCacheService;
 import org.jooq.JSONB;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,9 +27,16 @@ public class ChildService {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final ChildDao childDao;
+    private final SchoolDataCacheService cacheService;
 
-    public ChildService(ChildDao childDao) {
+    @Autowired
+    public ChildService(ChildDao childDao, SchoolDataCacheService cacheService) {
         this.childDao = childDao;
+        this.cacheService = cacheService;
+    }
+
+    ChildService(ChildDao childDao) {
+        this(childDao, new SchoolDataCacheService());
     }
 
     @Transactional(readOnly = true)
@@ -64,7 +73,9 @@ public class ChildService {
         record.setLastName(request.lastName());
         record.setDateOfBirth(request.dateOfBirth());
         record.setMetadata(JSONB.valueOf(metadataJson(request)));
-        return ChildResponse.fromRecord(childDao.save(record, OffsetDateTime.now()));
+        ChildrenRecord saved = childDao.save(record, OffsetDateTime.now());
+        cacheService.clearAttendanceCaches(record.getTenantId());
+        return ChildResponse.fromRecord(saved);
     }
 
     private String metadataJson(ChildRequest request) {
