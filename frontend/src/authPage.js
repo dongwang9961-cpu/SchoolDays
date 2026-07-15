@@ -6,6 +6,7 @@ import {
   requestParentRegistrationLink,
   startGoogleAuth,
 } from "./api/auth.js";
+import { markAuthenticatedSessionStarted } from "./api/client.js";
 
 const REMEMBERED_LOGIN_EMAIL_KEY = "schooldays.rememberedLoginEmail";
 
@@ -486,6 +487,7 @@ function stateOptions() {
 
 function storeAuthResponse(response) {
   localStorage.setItem("schooldays.accessToken", response.accessToken);
+  markAuthenticatedSessionStarted();
 }
 
 function rememberedLoginEmail() {

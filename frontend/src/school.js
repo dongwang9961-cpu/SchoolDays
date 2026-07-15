@@ -1,7 +1,7 @@
 import { contextError, contextNote, escapeHtml, renderAuthPage } from "./authPage.js";
 import { updateProfile } from "./api/account.js";
 import { getCurrentAuthUser } from "./api/auth.js";
-import { ApiError } from "./api/client.js";
+import { ApiError, markAuthenticatedSessionStarted, stopAuthenticatedSessionTracking } from "./api/client.js";
 import { getPublicSchool } from "./api/schools.js";
 import { renderSchoolDashboard } from "./schoolAdminDashboard.js";
 import QRCode from "qrcode";
@@ -43,6 +43,7 @@ function consumeAccessTokenHash() {
     return;
   }
   localStorage.setItem("schooldays.accessToken", accessToken);
+  markAuthenticatedSessionStarted();
   hashParams.delete("accessToken");
   const nextHash = hashParams.toString();
   const nextUrl = window.location.pathname + window.location.search + (nextHash ? `#${nextHash}` : "");
@@ -106,6 +107,7 @@ async function loadExistingSession() {
   try {
     return { user: await getCurrentAuthUser() };
   } catch (error) {
+    stopAuthenticatedSessionTracking();
     localStorage.removeItem("schooldays.accessToken");
     return null;
   }
@@ -237,6 +239,7 @@ function portalLabel() {
 
 function schoolLookupErrorText() {
   if (schoolLookup.error instanceof ApiError && schoolLookup.error.status === 401) {
+    stopAuthenticatedSessionTracking();
     localStorage.removeItem("schooldays.accessToken");
     return "The school lookup was rejected because the browser had stale sign-in state. Refresh this page and sign in again.";
   }
@@ -383,6 +386,7 @@ function renderParentProfileCompletion(response) {
 
 function endAuthenticatedSession() {
   disableAuthenticatedBackGuard();
+  stopAuthenticatedSessionTracking();
   localStorage.removeItem("schooldays.accessToken");
   returnToLoginPage();
 }
