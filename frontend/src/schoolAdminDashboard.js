@@ -2553,7 +2553,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         return;
       }
 
+      removeStudentCardPrintArtifacts();
       printStyle = document.createElement("style");
+      printStyle.setAttribute("data-student-card-print-style", "");
       printStyle.textContent = pageStyles;
       document.head.appendChild(printStyle);
 
@@ -2565,15 +2567,14 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       await new Promise((resolve) => {
         window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
       });
-      const afterPrint = new Promise((resolve) => {
-        const fallback = window.setTimeout(resolve, 3000);
-        window.addEventListener("afterprint", () => {
-          window.clearTimeout(fallback);
-          resolve();
-        }, { once: true });
-      });
       window.print();
-      await afterPrint;
+      if (isIosBrowser()) {
+        scheduleStudentCardPrintArtifactCleanup(printRoot, printStyle);
+        printRoot = null;
+        printStyle = null;
+      } else {
+        await waitForInPageStudentCardPrint();
+      }
 
       checkInStudentsMessage = `${selectedStudents.length} student card${selectedStudents.length === 1 ? "" : "s"} ready to print.`;
     } catch (printError) {
@@ -2596,13 +2597,44 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   function shouldUseStudentCardPrintWindow() {
     const userAgent = window.navigator?.userAgent || "";
     const vendor = window.navigator?.vendor || "";
-    const platform = window.navigator?.platform || "";
-    const isIos = /iPhone|iPad|iPod/i.test(userAgent)
-      || (platform === "MacIntel" && Number(window.navigator?.maxTouchPoints || 0) > 1);
     return /Safari/i.test(userAgent)
       && /Apple Computer/i.test(vendor)
-      && !isIos
+      && !isIosBrowser()
       && !/Chrome|Chromium|CriOS|FxiOS|Edg|EdgiOS|OPR|OPiOS|Android/i.test(userAgent);
+  }
+
+  function isIosBrowser() {
+    const userAgent = window.navigator?.userAgent || "";
+    const platform = window.navigator?.platform || "";
+    return /iPhone|iPad|iPod/i.test(userAgent)
+      || (platform === "MacIntel" && Number(window.navigator?.maxTouchPoints || 0) > 1);
+  }
+
+  function removeStudentCardPrintArtifacts() {
+    document.querySelectorAll("[data-student-card-print-root], [data-student-card-print-style]").forEach((node) => {
+      node.remove();
+    });
+  }
+
+  function scheduleStudentCardPrintArtifactCleanup(printRoot, printStyle) {
+    window.setTimeout(() => {
+      if (printRoot?.parentNode) {
+        printRoot.parentNode.removeChild(printRoot);
+      }
+      if (printStyle?.parentNode) {
+        printStyle.parentNode.removeChild(printStyle);
+      }
+    }, 2 * 60 * 1000);
+  }
+
+  async function waitForInPageStudentCardPrint() {
+    await new Promise((resolve) => {
+      const fallback = window.setTimeout(resolve, 3000);
+      window.addEventListener("afterprint", () => {
+        window.clearTimeout(fallback);
+        resolve();
+      }, { once: true });
+    });
   }
 
   async function printStudentCardsFromWindow(printWindow, { closeAfterPrint = false } = {}) {
