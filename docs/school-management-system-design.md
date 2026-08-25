@@ -2001,6 +2001,92 @@ Example `metadata` values:
 }
 ```
 
+
+# Invite New User
+
+Add an **"Invite New User"** option to the School Admin selection page.
+
+When a school administrator clicks this option, navigate to the **Invite User** page.
+
+The page allows the administrator to invite users as **School Administrators**, **Teachers**, or **Parents**.
+
+---
+
+## Invite School Administrator
+
+The administrator enters the email address of the person to be invited as a school administrator.
+
+After clicking **Invite Admin**, the system sends **at most one email** and handles the request as follows:
+
+* **User already exists and already has the Admin role**
+
+  * No action is taken.
+  * Display a message indicating that the user is already a school administrator.
+
+* **User already exists but does not have the Admin role**
+
+  * Automatically grant the **Admin** role to the user.
+  * Send an email notifying the user that they have been granted school administrator access.
+
+* **User does not exist**
+
+  * Send an invitation email containing a registration link.
+  * The invited user can follow the link to register and become a school administrator.
+
+---
+
+## Invite Teacher
+
+The administrator enters one or more email addresses for teachers (**maximum of 5 invitations per request**).
+
+Before sending invitations, the administrator must select a class from a drop-down list. The selected class will be assigned to all invited teachers.
+
+After clicking **Invite Teacher**, the system sends **at most one email per invited user** and handles each user independently as follows:
+
+* **User already exists, has the Teacher role, and is already assigned to the selected class**
+
+  * No action is taken.
+  * Display a message indicating that the user is already a teacher for the selected class.
+
+* **User already exists but does not have the Teacher role**
+
+  * Automatically grant the **Teacher** role.
+  * Assign the selected class to the teacher.
+  * Send an email notifying the user that they have been granted teacher access and assigned to the class.
+
+* **User already exists as a Teacher but is not assigned to the selected class**
+
+  * Assign the selected class to the teacher.
+  * Send an email notifying the user that they have been assigned to the class.
+
+* **User does not exist**
+
+  * Send an invitation email containing a registration link.
+  * After completing registration, the user becomes a school teacher and is automatically assigned to the selected class.
+
+---
+
+## Invite Parent
+
+The administrator enters one or more email addresses for parents (no limit on the number of invitations).
+
+After clicking **Invite Parent**, the system sends **at most one email per invited user** and handles each user independently as follows:
+
+* **User already exists and already has the Parent role**
+
+  * No action is taken.
+  * Display a message indicating that the user is already a school parent.
+
+* **User already exists but does not have the Parent role**
+
+  * Automatically grant the **Parent** role.
+  * Send an email notifying the user that they have been granted parent access.
+
+* **User does not exist**
+
+  * Send an invitation email containing a registration link.
+  * After completing registration, the user becomes a school parent.
+
 Notes:
 
 - `subject_snapshot` is optional and only records the subject used at send time if available.
