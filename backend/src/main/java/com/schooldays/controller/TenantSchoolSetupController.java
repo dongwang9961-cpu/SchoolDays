@@ -91,9 +91,18 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/sites")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
-    public ResponseEntity<SiteListResponse> listSites(@PathVariable("tenantId") UUID tenantId) {
-        return ResponseEntity.ok(siteService.listSites(tenantId));
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'SITE_MANAGER')")
+    public ResponseEntity<SiteListResponse> listSites(
+            @PathVariable("tenantId") UUID tenantId,
+            Authentication authentication
+    ) {
+        if (tenantSecurity.hasTenantRole(authentication, tenantId, "SCHOOL_ADMIN")) {
+            return ResponseEntity.ok(siteService.listSites(tenantId));
+        }
+        return ResponseEntity.ok(siteService.listSites(
+                tenantId,
+                tenantSecurity.siteManagerSiteIds(authentication, tenantId)
+        ));
     }
 
     @PostMapping("/sites")
@@ -116,7 +125,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/programs")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageSite(authentication, #tenantId, #siteId)")
     public ResponseEntity<ProgramListResponse> listPrograms(
             @PathVariable("tenantId") UUID tenantId,
             @RequestParam("siteId") UUID siteId
@@ -125,7 +134,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/programs")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("#request != null and @tenantSecurity.canManageSite(authentication, #tenantId, #request.siteId())")
     public ResponseEntity<ProgramResponse> createProgram(
             @PathVariable("tenantId") UUID tenantId,
             @Valid @RequestBody CreateProgramRequest request
@@ -134,7 +143,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PatchMapping("/programs/{programId}")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageProgram(authentication, #tenantId, #programId)")
     public ResponseEntity<ProgramResponse> updateProgram(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("programId") UUID programId,
@@ -144,7 +153,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/classes")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageSite(authentication, #tenantId, #siteId)")
     public ResponseEntity<ClassListResponse> listClasses(
             @PathVariable("tenantId") UUID tenantId,
             @RequestParam("siteId") UUID siteId
@@ -162,16 +171,17 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/students")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN') or (#classId != null and @tenantSecurity.canManageClass(authentication, #tenantId, #classId)) or (#siteId != null and @tenantSecurity.canManageSite(authentication, #tenantId, #siteId))")
     public ResponseEntity<StudentRosterResponse> listStudents(
             @PathVariable("tenantId") UUID tenantId,
-            @RequestParam(value = "classId", required = false) UUID classId
+            @RequestParam(value = "classId", required = false) UUID classId,
+            @RequestParam(value = "siteId", required = false) UUID siteId
     ) {
-        return ResponseEntity.ok(studentRosterService.listActiveClassStudents(tenantId, classId));
+        return ResponseEntity.ok(studentRosterService.listActiveClassStudents(tenantId, classId, siteId));
     }
 
     @PostMapping("/user-invitations")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN') or (#request != null and #request.role() != null and #request.role().equalsIgnoreCase('TEACHER') and @tenantSecurity.canManageClass(authentication, #tenantId, #request.classId()))")
     public ResponseEntity<InviteUserResponse> inviteUsers(
             @PathVariable("tenantId") UUID tenantId,
             @Valid @RequestBody InviteUserRequest request,
@@ -269,7 +279,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/classes")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("#request != null and @tenantSecurity.canManageProgram(authentication, #tenantId, #request.programId())")
     public ResponseEntity<ClassResponse> createClass(
             @PathVariable("tenantId") UUID tenantId,
             @Valid @RequestBody CreateClassRequest request
@@ -278,7 +288,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PatchMapping("/classes/{classId}")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId) and (#request == null or #request.programId() == null or @tenantSecurity.canManageProgram(authentication, #tenantId, #request.programId()))")
     public ResponseEntity<ClassResponse> updateClass(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,
@@ -288,7 +298,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/classes/{classId}/close-enrollment")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<ClassResponse> closeClassEnrollment(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId
@@ -297,7 +307,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/classes/{classId}/stop")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<ClassResponse> stopClass(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId
@@ -306,7 +316,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/classes/{classId}/pricing")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<ClassPricingResponse> getClassPricing(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId
@@ -315,7 +325,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/classes/{classId}/pricing")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<ClassPricingResponse> saveClassPricing(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,
@@ -325,7 +335,7 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/classes/{classId}/schedules")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<EndpointStatusResponse> createClassSchedule(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,

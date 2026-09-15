@@ -420,7 +420,10 @@ function returnToLoginPage() {
 
 function schoolPortalRole(user, tenantId) {
   if (schoolRoute.portal === "admin") {
-    return hasSchoolRole(user, tenantId, "SCHOOL_ADMIN") ? "SCHOOL_ADMIN" : "";
+    if (hasSchoolRole(user, tenantId, "SCHOOL_ADMIN")) {
+      return "SCHOOL_ADMIN";
+    }
+    return hasSchoolRole(user, tenantId, "SITE_MANAGER") ? "SITE_MANAGER" : "";
   }
   if (schoolRoute.portal === "teacher") {
     return hasSchoolRole(user, tenantId, "TEACHER") ? "TEACHER" : "";

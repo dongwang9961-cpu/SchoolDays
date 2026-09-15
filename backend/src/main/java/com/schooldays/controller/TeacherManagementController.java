@@ -31,7 +31,7 @@ public class TeacherManagementController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/classes/{classId}/teachers")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<ClassTeacherListResponse> listClassTeachers(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId
@@ -40,7 +40,7 @@ public class TeacherManagementController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/classes/{classId}/teachers/invite")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<EndpointStatusResponse> inviteTeacher(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,
@@ -56,7 +56,7 @@ public class TeacherManagementController extends ApiPlaceholderSupport {
     }
 
     @PostMapping("/classes/{classId}/teachers")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<ClassTeacherResponse> assignTeacher(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,
@@ -72,7 +72,7 @@ public class TeacherManagementController extends ApiPlaceholderSupport {
     }
 
     @DeleteMapping("/classes/{classId}/teachers/{teacherUserId}")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN')")
+    @PreAuthorize("@tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<EndpointStatusResponse> removeTeacher(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId,

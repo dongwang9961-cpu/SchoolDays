@@ -47,7 +47,7 @@ public class AttendanceController extends ApiPlaceholderSupport {
     }
 
     @GetMapping("/api/tenants/{tenantId}/classes/{classId}/attendance-grid")
-    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'SCHOOL_ADMIN', 'TEACHER')")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'TEACHER') or @tenantSecurity.canManageClass(authentication, #tenantId, #classId)")
     public ResponseEntity<AttendanceGridResponse> getClassAttendanceGrid(
             @PathVariable("tenantId") UUID tenantId,
             @PathVariable("classId") UUID classId

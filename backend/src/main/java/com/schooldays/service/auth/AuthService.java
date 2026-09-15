@@ -1,6 +1,8 @@
 package com.schooldays.service.auth;
 
 import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
+import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
+import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 import static com.schooldays.jooq.generated.tables.TeacherAssignments.TEACHER_ASSIGNMENTS;
 import static com.schooldays.jooq.generated.tables.TeacherInvitations.TEACHER_INVITATIONS;
 import static com.schooldays.jooq.generated.tables.TenantInvitations.TENANT_INVITATIONS;
@@ -74,6 +76,7 @@ import org.slf4j.LoggerFactory;
 public class AuthService {
 
     private static final Set<String> SELF_SERVICE_ROLES = Set.of("PARENT");
+    private static final Set<String> INVITATION_ROLES = Set.of("SCHOOL_ADMIN", "SITE_MANAGER", "TEACHER", "PARENT");
     private static final long REGISTRATION_LINK_TTL_HOURS = 48;
     private static final String GOOGLE_PENDING_PHONE = "__google_profile_pending__";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -225,7 +228,12 @@ public class AuthService {
                 metadataJson,
                 now
         );
-        roleDao.assignRole(userId, link.tenantId(), link.intendedRole());
+        if ("SITE_MANAGER".equals(link.intendedRole())) {
+            requireSite(link.tenantId(), link.relatedInvitationId());
+            roleDao.assignSiteManagerRole(userId, link.tenantId(), link.relatedInvitationId());
+        } else {
+            roleDao.assignRole(userId, link.tenantId(), link.intendedRole());
+        }
         if ("TEACHER".equals(link.intendedRole()) && link.relatedInvitationId() != null) {
             assignTeacherToClass(link.tenantId(), link.relatedInvitationId(), userId, userId);
         }
@@ -372,9 +380,11 @@ public class AuthService {
         if (emails.isEmpty()) {
             throw new InvalidAuthRequestException("At least one email address is required");
         }
-        if (Set.of("SCHOOL_ADMIN", "TEACHER").contains(role) && !roleDao.hasTenantRole(invitedByUserId, tenantId, "SCHOOL_ADMIN")) {
-            throw new InvalidAuthRequestException("Only school administrators can send invitations for school administrator or teacher roles");
+        if (!INVITATION_ROLES.contains(role)) {
+            throw new InvalidAuthRequestException("Unknown invitation role: " + request.role());
         }
+
+        boolean invitedBySchoolAdmin = roleDao.hasTenantRole(invitedByUserId, tenantId, "SCHOOL_ADMIN");
         if ("TEACHER".equals(role)) {
             if (request.classId() == null) {
                 throw new InvalidAuthRequestException("A class must be selected for teacher invitations");
@@ -382,19 +392,30 @@ public class AuthService {
             if (emails.size() > 5) {
                 throw new InvalidAuthRequestException("Teacher invitations are limited to 5 email addresses per request");
             }
+            if (!invitedBySchoolAdmin && !userCanManageClass(invitedByUserId, tenantId, request.classId())) {
+                throw new InvalidAuthRequestException("Only school administrators or site managers for the selected class can send teacher invitations");
+            }
+        } else if (!invitedBySchoolAdmin) {
+            throw new InvalidAuthRequestException("Only school administrators can send invitations for this role");
+        }
+        if ("SITE_MANAGER".equals(role)) {
+            if (request.siteId() == null) {
+                throw new InvalidAuthRequestException("A site must be selected for site manager invitations");
+            }
+            requireSite(tenantId, request.siteId());
+            if (emails.size() > 1) {
+                throw new InvalidAuthRequestException("Site manager invitations accept one email address per request");
+            }
         }
         if ("SCHOOL_ADMIN".equals(role) && emails.size() > 1) {
             throw new InvalidAuthRequestException("School administrator invitations accept one email address per request");
-        }
-        if (!Set.of("SCHOOL_ADMIN", "TEACHER", "PARENT").contains(role)) {
-            throw new InvalidAuthRequestException("Unknown invitation role: " + request.role());
         }
 
         PublicSchoolResponse school = tenantDao.findActivePublicSchoolById(tenantId)
                 .orElseThrow(() -> new InvalidAuthRequestException("School not found"));
 
         List<InviteUserResultResponse> results = emails.stream()
-                .map(email -> inviteUser(tenantId, invitedByUserId, school, role, request.classId(), email))
+                .map(email -> inviteUser(tenantId, invitedByUserId, school, role, request.classId(), request.siteId(), email))
                 .toList();
         return new InviteUserResponse("success", results);
     }
@@ -406,8 +427,8 @@ public class AuthService {
         if (!roleDao.hasTenantRole(requestedByUserId, tenantId, "SCHOOL_ADMIN")) {
             throw new InvalidAuthRequestException("Only school administrators can send password reset links");
         }
-        if (!Set.of("SCHOOL_ADMIN", "TEACHER").contains(role)) {
-            throw new InvalidAuthRequestException("Password reset links can only be sent for school administrators or teachers");
+        if (!Set.of("SCHOOL_ADMIN", "SITE_MANAGER", "TEACHER").contains(role)) {
+            throw new InvalidAuthRequestException("Password reset links can only be sent for school administrators, site managers, or teachers");
         }
         if (emails.isEmpty()) {
             throw new InvalidAuthRequestException("At least one email address is required");
@@ -549,6 +570,7 @@ public class AuthService {
             PublicSchoolResponse school,
             String role,
             UUID classId,
+            UUID siteId,
             String rawEmail
     ) {
         String email = EmailNormalizer.normalize(rawEmail);
@@ -556,6 +578,9 @@ public class AuthService {
 
         if ("SCHOOL_ADMIN".equals(role)) {
             return inviteSchoolAdmin(tenantId, school, email, userId);
+        }
+        if ("SITE_MANAGER".equals(role)) {
+            return inviteSiteManager(tenantId, school, siteId, email, userId);
         }
         if ("TEACHER".equals(role)) {
             return inviteTeacher(tenantId, invitedByUserId, school, classId, email, userId);
@@ -599,6 +624,51 @@ public class AuthService {
         return new InviteUserResultResponse(
                 email,
                 "SCHOOL_ADMIN",
+                "invited",
+                "Invitation email sent with a registration link."
+        );
+    }
+
+    private InviteUserResultResponse inviteSiteManager(
+            UUID tenantId,
+            PublicSchoolResponse school,
+            UUID siteId,
+            String email,
+            UUID userId
+    ) {
+        requireSite(tenantId, siteId);
+        String siteName = siteName(tenantId, siteId);
+
+        if (userId != null && roleDao.hasSiteManagerRole(userId, tenantId, siteId)) {
+            return new InviteUserResultResponse(
+                    email,
+                    "SITE_MANAGER",
+                    "already_site_manager",
+                    "The user is already a site manager for the selected site."
+            );
+        }
+
+        if (userId != null) {
+            roleDao.assignSiteManagerRole(userId, tenantId, siteId);
+            sendSiteManagerGrantedEmail(school, siteName, email);
+            return new InviteUserResultResponse(
+                    email,
+                    "SITE_MANAGER",
+                    "granted",
+                    "Site manager access granted and notification email sent."
+            );
+        }
+
+        createRegistrationLink(
+                tenantId,
+                email,
+                "SITE_MANAGER",
+                "site_manager_invitation",
+                siteId
+        );
+        return new InviteUserResultResponse(
+                email,
+                "SITE_MANAGER",
                 "invited",
                 "Invitation email sent with a registration link."
         );
@@ -792,8 +862,12 @@ public class AuthService {
                     String classNote = link.relatedInvitationId() != null && "TEACHER".equals(response.intendedRole())
                             ? " After registration, you will be assigned to the selected class."
                             : "";
-                    String classNoteText = classNote.isBlank() ? "" : "\n\n" + classNote.trim();
-                    String classNoteHtml = classNote.isBlank() ? "" : "<p>" + escapeHtml(classNote.trim()) + "</p>";
+                    String siteManagerNote = link.relatedInvitationId() != null && "SITE_MANAGER".equals(response.intendedRole())
+                            ? " After registration, you will manage the selected site."
+                            : "";
+                    String scopeNote = classNote + siteManagerNote;
+                    String classNoteText = scopeNote.isBlank() ? "" : "\n\n" + scopeNote.trim();
+                    String classNoteHtml = scopeNote.isBlank() ? "" : "<p>" + escapeHtml(scopeNote.trim()) + "</p>";
                     String textBody = """
                             Hello,
 
@@ -900,6 +974,31 @@ public class AuthService {
         ));
     }
 
+    private void sendSiteManagerGrantedEmail(PublicSchoolResponse school, String siteName, String email) {
+        String subject = "SchoolDays site manager access for " + school.name();
+        String textBody = """
+                Hello,
+
+                You have been granted site manager access for %s at %s.
+
+                You can sign in to SchoolDays with your existing account.
+                """.formatted(siteName, school.name());
+        String htmlBody = """
+                <p>Hello,</p>
+                <p>You have been granted site manager access for %s at %s.</p>
+                <p>You can sign in to SchoolDays with your existing account.</p>
+                """.formatted(escapeHtml(siteName), escapeHtml(school.name()));
+
+        systemEmailService.send(new SystemEmailMessage(
+                email,
+                systemEmailFromEmail,
+                school.name(),
+                subject,
+                textBody,
+                htmlBody
+        ));
+    }
+
     private void sendParentGrantedEmail(PublicSchoolResponse school, String email) {
         String subject = "SchoolDays parent access for " + school.name();
         String textBody = """
@@ -983,6 +1082,44 @@ public class AuthService {
         }
     }
 
+    private void requireSite(UUID tenantId, UUID siteId) {
+        if (siteId == null) {
+            throw new InvalidAuthRequestException("A site must be selected for site manager access");
+        }
+        boolean siteExists = dsl.fetchExists(dsl.selectOne()
+                .from(SCHOOL_SITES)
+                .where(SCHOOL_SITES.TENANT_ID.eq(tenantId))
+                .and(SCHOOL_SITES.ID.eq(siteId)));
+        if (!siteExists) {
+            throw new InvalidAuthRequestException("Site was not found");
+        }
+    }
+
+    private boolean userCanManageClass(UUID userId, UUID tenantId, UUID classId) {
+        if (classId == null) {
+            return false;
+        }
+        if (roleDao.hasTenantRole(userId, tenantId, "SCHOOL_ADMIN")) {
+            return true;
+        }
+        UUID siteId = dsl.select(PROGRAMS.SITE_ID)
+                .from(CLASSES)
+                .join(PROGRAMS).on(PROGRAMS.ID.eq(CLASSES.PROGRAM_ID))
+                .where(CLASSES.TENANT_ID.eq(tenantId))
+                .and(CLASSES.ID.eq(classId))
+                .fetchOne(PROGRAMS.SITE_ID);
+        return roleDao.hasSiteManagerRole(userId, tenantId, siteId);
+    }
+
+    private String siteName(UUID tenantId, UUID siteId) {
+        String name = dsl.select(SCHOOL_SITES.NAME)
+                .from(SCHOOL_SITES)
+                .where(SCHOOL_SITES.TENANT_ID.eq(tenantId))
+                .and(SCHOOL_SITES.ID.eq(siteId))
+                .fetchOne(SCHOOL_SITES.NAME);
+        return isBlank(name) ? "the selected site" : name;
+    }
+
     private boolean isTeacherAssignedToClass(UUID classId, UUID teacherUserId) {
         return dsl.fetchExists(dsl.selectOne()
                 .from(TEACHER_ASSIGNMENTS)
@@ -1006,6 +1143,7 @@ public class AuthService {
         String normalizedRole = normalizeRole(intendedRole);
         return switch (normalizedRole) {
             case "SCHOOL_ADMIN" -> "school administrator registration";
+            case "SITE_MANAGER" -> "site manager registration";
             case "TEACHER" -> "teacher registration";
             case "PARENT" -> "registration";
             default -> "registration";
@@ -1028,7 +1166,7 @@ public class AuthService {
         }
         String portalPath = switch (normalizeRole(intendedRole)) {
             case "TEACHER" -> "/t";
-            case "SCHOOL_ADMIN" -> "/admin";
+            case "SCHOOL_ADMIN", "SITE_MANAGER" -> "/admin";
             default -> "";
         };
         return tenantDao.findActivePublicSchoolById(tenantId)

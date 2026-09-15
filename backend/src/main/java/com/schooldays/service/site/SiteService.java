@@ -4,6 +4,7 @@ import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 import static com.schooldays.jooq.generated.tables.Tenants.TENANTS;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -44,12 +45,24 @@ public class SiteService {
     }
 
     public SiteListResponse listSites(UUID tenantId) {
+        return listSites(tenantId, null);
+    }
+
+    public SiteListResponse listSites(UUID tenantId, Collection<UUID> siteIds) {
         TenantsRecord tenant = requireTenant(tenantId);
+        if (siteIds != null && siteIds.isEmpty()) {
+            return new SiteListResponse(List.of(), quotaFor(tenant, countSites(tenantId)));
+        }
+        var condition = SCHOOL_SITES.TENANT_ID.eq(tenantId);
+        if (siteIds != null) {
+            condition = condition.and(SCHOOL_SITES.ID.in(siteIds));
+        }
         List<SiteResponse> sites = dsl.selectFrom(SCHOOL_SITES)
-                .where(SCHOOL_SITES.TENANT_ID.eq(tenantId))
+                .where(condition)
                 .orderBy(SCHOOL_SITES.SEQ_ID.asc())
                 .fetch(SiteResponse::from);
-        return new SiteListResponse(sites, quotaFor(tenant, sites.size()));
+        int currentSiteCount = siteIds == null ? sites.size() : countSites(tenantId);
+        return new SiteListResponse(sites, quotaFor(tenant, currentSiteCount));
     }
 
     public SiteResponse createSite(UUID tenantId, CreateSiteRequest request) {

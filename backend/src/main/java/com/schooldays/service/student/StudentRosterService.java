@@ -25,10 +25,20 @@ public class StudentRosterService {
     }
 
     public StudentRosterResponse listActiveClassStudents(UUID tenantId, UUID classId) {
+        return listActiveClassStudents(tenantId, classId, null);
+    }
+
+    public StudentRosterResponse listActiveClassStudents(UUID tenantId, UUID classId, UUID siteId) {
+        if (siteId != null && !studentRosterDao.siteBelongsToTenant(tenantId, siteId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Site was not found");
+        }
         if (classId != null && !studentRosterDao.classBelongsToTenant(tenantId, classId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found");
         }
-        List<StudentRosterRowResponse> students = studentRosterDao.listActiveClassStudents(tenantId, classId)
+        if (classId != null && siteId != null && !studentRosterDao.classBelongsToSite(tenantId, classId, siteId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Class does not belong to the selected site");
+        }
+        List<StudentRosterRowResponse> students = studentRosterDao.listActiveClassStudents(tenantId, classId, siteId)
                 .stream()
                 .map(StudentRosterRowResponse::from)
                 .toList();

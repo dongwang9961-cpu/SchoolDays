@@ -304,6 +304,35 @@ class AuthDaoTests {
     }
 
     @Test
+    void roleDaoAssignsSiteManagerRoleWithScopedSiteMetadata() {
+        UUID userId = userDao.createOrUpdatePasswordUser(
+                "manager@example.com",
+                "hash",
+                "Mina",
+                "Manager",
+                "555-0402",
+                OffsetDateTime.now()
+        );
+        UUID siteOneId = UUID.randomUUID();
+        UUID siteTwoId = UUID.randomUUID();
+
+        roleDao.assignSiteManagerRole(userId, tenantId, siteOneId);
+        roleDao.assignSiteManagerRole(userId, tenantId, siteTwoId);
+
+        List<TenantRole> tenantRoles = roleDao.findTenantRoles(userId);
+
+        assertThat(tenantRoles).hasSize(1);
+        TenantRole tenantRole = tenantRoles.get(0);
+        assertThat(tenantRole.tenantId()).isEqualTo(tenantId);
+        assertThat(tenantRole.role()).isEqualTo("SITE_MANAGER");
+        assertThat(tenantRole.siteIds()).containsExactlyInAnyOrder(siteOneId, siteTwoId);
+        assertThat(tenantRole.appliesToSite(siteOneId)).isTrue();
+        assertThat(tenantRole.appliesToSite(UUID.randomUUID())).isFalse();
+        assertThat(roleDao.hasSiteManagerRole(userId, tenantId, siteTwoId)).isTrue();
+        assertThat(dsl.fetchCount(USER_ROLES)).isEqualTo(1);
+    }
+
+    @Test
     void roleDaoRejectsUnknownRole() {
         UUID userId = userDao.createOrUpdatePasswordUser(
                 "admin@example.com",

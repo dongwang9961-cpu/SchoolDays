@@ -107,6 +107,10 @@ const schoolAdminSiteSections = [
   },
 ];
 
+const siteManagerSiteSections = schoolAdminSiteSections.filter((section) =>
+  ["programs", "classes", "students", "teachers", "attendance"].includes(section.id)
+);
+
 const teacherSections = [
   {
     id: "overview",
@@ -209,6 +213,11 @@ const roleDashboards = {
     navLabel: "School admin",
     sections: schoolAdminManagementSections,
   },
+  SITE_MANAGER: {
+    label: "Site manager",
+    navLabel: "Site manager",
+    sections: siteManagerSiteSections,
+  },
   TEACHER: {
     label: "Teacher",
     navLabel: "Teacher portal",
@@ -225,9 +234,12 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   const dashboard = roleDashboards[role] || roleDashboards.PARENT;
   const root = document.querySelector("#root");
   const currentUserEmail = String(user?.email || "").trim().toLowerCase();
-  let adminMode = role === "SCHOOL_ADMIN" ? "" : "portal";
+  const isSchoolAdmin = role === "SCHOOL_ADMIN";
+  const isSiteManager = role === "SITE_MANAGER";
+  const isSiteOperator = isSchoolAdmin || isSiteManager;
+  let adminMode = isSchoolAdmin ? "" : isSiteManager ? "site" : "portal";
   let teacherMode = role === "TEACHER" ? "choice" : "";
-  let activeSectionId = role === "SCHOOL_ADMIN" ? "sites" : "overview";
+  let activeSectionId = isSchoolAdmin ? "sites" : isSiteManager ? "programs" : "overview";
   let activeOperation = "";
   let notice = "";
   let error = "";
@@ -371,7 +383,7 @@ const EXTERNAL_STUDENT_CACHE_VERSION = 1;
 const EXTERNAL_STUDENT_CACHE_PREFIX = "schooldays.externalStudents";
 const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
-  if (role === "SCHOOL_ADMIN") {
+  if (isSchoolAdmin || isSiteManager) {
     loadSites();
   } else if (role === "TEACHER") {
     loadTeacherClasses();
@@ -402,7 +414,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   function render() {
     scheduleNoticeDismissal();
     syncCheckInPeriodicRefresh();
-    if (!((role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "camera")
+    if (!((isSchoolAdmin && adminMode === "checkIn" && checkInFlowStage === "camera")
       || (role === "TEACHER" && teacherMode === "checkIn" && checkInFlowStage === "camera"))) {
       stopCheckInScanner();
     }
@@ -416,7 +428,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       renderTeacherChoiceScreen();
       return;
     }
-    if ((role === "SCHOOL_ADMIN" && adminMode === "externalAttendance") || (role === "TEACHER" && teacherMode === "externalAttendance")) {
+    if ((isSchoolAdmin && adminMode === "externalAttendance") || (role === "TEACHER" && teacherMode === "externalAttendance")) {
       if (externalAttendanceStage !== "calendar") {
         renderExternalAttendanceIntro();
       } else {
@@ -432,23 +444,23 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       renderTeacherCheckIn();
       return;
     }
-    if (role === "SCHOOL_ADMIN" && !adminMode) {
+    if (isSchoolAdmin && !adminMode) {
       renderSchoolAdminLanding();
       return;
     }
-    if (role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage !== "camera") {
+    if (isSchoolAdmin && adminMode === "checkIn" && checkInFlowStage !== "camera") {
       renderSchoolAdminCheckInIntro();
       return;
     }
-    if (role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "camera") {
+    if (isSchoolAdmin && adminMode === "checkIn" && checkInFlowStage === "camera") {
       renderSchoolAdminCheckIn();
       return;
     }
-    if (role === "SCHOOL_ADMIN" && adminMode === "inviteUser") {
+    if (isSchoolAdmin && adminMode === "inviteUser") {
       renderSchoolAdminInviteUser();
       return;
     }
-    if (role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
+    if (isSiteOperator && adminMode === "site" && !selectedSite()) {
       renderSiteLoginScreen();
       return;
     }
@@ -457,7 +469,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     const activeSection = sections.find((section) => section.id === activeSectionId) || sections[0];
     const rows = rowsFor(activeSection);
     const currentSite = selectedSite();
-    const title = role === "SCHOOL_ADMIN" && adminMode === "site" && currentSite ? currentSite.name : dashboard.label;
+    const title = isSiteOperator && adminMode === "site" && currentSite ? currentSite.name : dashboard.label;
     const notificationModalOpen = activeOperation && isNotificationOperation(activeOperation);
     const checkInTasks = role === "PARENT" ? pendingCheckInTasks() : [];
     const checkInReminderVisible = checkInTasks.length > 0 && (checkInReminderOpen || !checkInReminderDismissed);
@@ -473,7 +485,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             <h1>${escapeHtml(title)}</h1>
           </div>
 
-          ${role === "SCHOOL_ADMIN" ? adminModeSwitcher() : role === "TEACHER" ? teacherModeSwitcher() : ""}
+          ${isSchoolAdmin ? adminModeSwitcher() : role === "TEACHER" ? teacherModeSwitcher() : ""}
 
           <nav class="app-nav" aria-label="${escapeHtml(dashboard.navLabel)}">
             ${sections
@@ -569,7 +581,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             loadClasses();
             loadEnrollments();
             loadAttendance();
-          } else if (role === "SCHOOL_ADMIN") {
+          } else if (isSiteOperator) {
             loadClasses();
           }
         }
@@ -676,7 +688,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           loadClasses();
           return;
         }
-        if (isProgramOperation(action) && role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
+        if (isProgramOperation(action) && isSiteOperator && adminMode === "site" && !selectedSite()) {
           notice = "";
           error = "Log on to a site before managing programs.";
           activeOperation = "";
@@ -690,7 +702,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           render();
           return;
         }
-        if (isClassOperation(action) && role === "SCHOOL_ADMIN" && adminMode === "site" && !selectedSite()) {
+        if (isClassOperation(action) && isSiteOperator && adminMode === "site" && !selectedSite()) {
           notice = "";
           error = "Log on to a site before managing classes.";
           activeOperation = "";
@@ -895,6 +907,12 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     });
     root.querySelector("[data-class-assign-teacher]")?.addEventListener("click", () => {
       activeOperation = "Assign teacher";
+      notice = "";
+      error = "";
+      render();
+    });
+    root.querySelector("[data-class-invite-teacher]")?.addEventListener("click", () => {
+      activeOperation = "Invite teacher";
       notice = "";
       error = "";
       render();
@@ -1145,14 +1163,15 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
                   <span>Role</span>
                   <select data-invite-user-role name="role">
                     <option value="SCHOOL_ADMIN" ${inviteUserRole === "SCHOOL_ADMIN" ? "selected" : ""}>School Administrator</option>
+                    <option value="SITE_MANAGER" ${inviteUserRole === "SITE_MANAGER" ? "selected" : ""}>Site Manager</option>
                     <option value="TEACHER" ${inviteUserRole === "TEACHER" ? "selected" : ""}>Teacher</option>
                     <option value="PARENT" ${inviteUserRole === "PARENT" ? "selected" : ""}>Parent</option>
                   </select>
                 </label>
 
-                <label class="invite-site-field" data-invite-site-field ${inviteUserRole === "TEACHER" ? "" : "hidden"}>
+                <label class="invite-site-field" data-invite-site-field ${["SITE_MANAGER", "TEACHER"].includes(inviteUserRole) ? "" : "hidden"}>
                   <span>Site</span>
-                  <select data-invite-user-site name="siteId" ${inviteUserRole === "TEACHER" ? "" : "disabled"}>
+                  <select data-invite-user-site name="siteId" ${["SITE_MANAGER", "TEACHER"].includes(inviteUserRole) ? "" : "disabled"}>
                     <option value="">Choose a site</option>
                     ${sites.map((site) => `
                       <option value="${escapeHtml(site.id)}" ${inviteUserSiteId === site.id ? "selected" : ""}>
@@ -1257,8 +1276,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       inviteUserMessage = "";
       inviteUserError = "";
       inviteUserResults = [];
-      if (inviteUserRole === "TEACHER") {
+      if (["SITE_MANAGER", "TEACHER"].includes(inviteUserRole)) {
         inviteUserSiteId = inviteUserSiteId || selectedSiteId || sites[0]?.id || "";
+      }
+      if (inviteUserRole === "TEACHER") {
         loadInviteUserClasses();
       } else {
         inviteUserClassId = "";
@@ -1275,7 +1296,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       inviteUserMessage = "";
       inviteUserError = "";
       inviteUserResults = [];
-      loadInviteUserClasses();
+      if (inviteUserRole === "TEACHER") {
+        loadInviteUserClasses();
+      }
       render();
     });
     root.querySelector("[data-invite-user-class]")?.addEventListener("change", (event) => {
@@ -1310,7 +1333,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
               <p>Select the site you want to operate. Site-level menus appear after this choice.</p>
             </div>
             <div class="header-actions">
-              <button class="secondary-button compact-button" data-admin-mode="" type="button">Back</button>
+              ${isSchoolAdmin ? `<button class="secondary-button compact-button" data-admin-mode="" type="button">Back</button>` : ""}
               ${profileMenu(user)}
             </div>
           </header>
@@ -2890,7 +2913,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function initializeInviteUserPage() {
-    if (inviteUserRole === "TEACHER") {
+    if (["SITE_MANAGER", "TEACHER"].includes(inviteUserRole)) {
       inviteUserSiteId = inviteUserSiteId || selectedSiteId || sites[0]?.id || "";
     } else if (!inviteUserSiteId) {
       inviteUserSiteId = selectedSiteId || sites[0]?.id || "";
@@ -2940,6 +2963,11 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     if (inviteUserRole === "SCHOOL_ADMIN") {
       return "Invite one school administrator by email. Existing users are updated automatically.";
     }
+    if (inviteUserRole === "SITE_MANAGER") {
+      return inviteUserSiteId
+        ? "Invite one site manager for the selected site. Existing users are updated automatically."
+        : "Choose a site before inviting a site manager.";
+    }
     if (inviteUserRole === "TEACHER") {
       if (!inviteUserSiteId) {
         return "Choose a site before loading the class list.";
@@ -2949,10 +2977,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       }
       return "Invite up to 5 teachers and assign them to the selected class, or send reset links to existing teachers.";
     }
-    if (inviteUserRole === "SCHOOL_ADMIN") {
-      return "Invite one school administrator, or send reset links to existing school administrators.";
-    }
-    return "Invite any number of parents by email. Password reset from this screen is for teachers and school administrators.";
+    return "Invite any number of parents by email. Password reset from this screen is for school administrators, site managers, and teachers.";
   }
 
   function inviteUserResultHeading(result) {
@@ -2979,6 +3004,18 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       inviteUserError = "School administrator invitations accept one email address per request.";
       render();
       return;
+    }
+    if (inviteUserRole === "SITE_MANAGER") {
+      if (emails.length > 1) {
+        inviteUserError = "Site manager invitations accept one email address per request.";
+        render();
+        return;
+      }
+      if (!inviteUserSiteId) {
+        inviteUserError = "Choose a site before inviting a site manager.";
+        render();
+        return;
+      }
     }
     if (inviteUserRole === "TEACHER") {
       if (emails.length > 5) {
@@ -3007,6 +3044,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         role: inviteUserRole,
         emails,
         classId: inviteUserRole === "TEACHER" ? inviteUserClassId : null,
+        siteId: ["SITE_MANAGER", "TEACHER"].includes(inviteUserRole) ? inviteUserSiteId : null,
       });
       inviteUserResults = response.results || [];
       inviteUserMessage = inviteUserResults.length
@@ -3031,8 +3069,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     inviteUserError = "";
     inviteUserResults = [];
 
-    if (!["SCHOOL_ADMIN", "TEACHER"].includes(inviteUserRole)) {
-      inviteUserError = "Password reset emails can only be sent for school administrators or teachers.";
+    if (!["SCHOOL_ADMIN", "SITE_MANAGER", "TEACHER"].includes(inviteUserRole)) {
+      inviteUserError = "Password reset emails can only be sent for school administrators, site managers, or teachers.";
       render();
       return;
     }
@@ -3716,9 +3754,16 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       if (selectedSiteId && !sites.some((site) => site.id === selectedSiteId)) {
         selectedSiteId = "";
       }
+      if (isSiteManager && !selectedSiteId) {
+        selectedSiteId = sites[0]?.id || "";
+      }
       siteRows = sites.length
         ? sites.map((site) => `${site.name} - ${site.timezone} - ${site.status}`)
         : ["No sites have been created yet."];
+      if (isSiteManager && selectedSiteId) {
+        loadPrograms();
+        loadClasses();
+      }
     } catch (loadError) {
       siteRows = ["Sites could not be loaded."];
       error = loadError instanceof Error ? loadError.message : "Sites could not be loaded.";
@@ -3858,6 +3903,29 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         return;
       }
 
+      if (isInviteTeacherOperation(action)) {
+        const classRecord = selectedClass();
+        if (!classRecord) {
+          throw new Error("Select a class before inviting a teacher.");
+        }
+        const formData = new FormData(form);
+        const email = formText(formData, "email");
+        const response = await inviteUsers({
+          tenantId: school.tenantId,
+          role: "TEACHER",
+          emails: [email],
+          classId: classRecord.id,
+          siteId: selectedSite()?.id || selectedSiteId || null,
+        });
+        const result = response.results?.[0];
+        notice = result?.message || "Teacher invitation processed.";
+        error = "";
+        activeOperation = "";
+        render();
+        await loadClassTeachers();
+        return;
+      }
+
       if (isNotificationOperation(action)) {
         const formData = new FormData(form);
         if (!window.confirm("Send this email to every BCC recipient?")) {
@@ -3945,7 +4013,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       }
       return classRows || ["No classes have been created for this site yet."];
     }
-    if (section.id === "students" && role === "SCHOOL_ADMIN") {
+    if (section.id === "students" && isSiteOperator) {
       if (loadingStudents) {
         return ["Loading students..."];
       }
@@ -3969,7 +4037,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       }
       return attendanceRecords.length ? [] : ["No attendance records yet."];
     }
-    if (section.id === "attendance" && role === "SCHOOL_ADMIN") {
+    if (section.id === "attendance" && isSiteOperator) {
       if (loadingClasses || loadingAttendance) {
         return ["Loading class attendance..."];
       }
@@ -4072,7 +4140,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       `;
     }
     if (section.id === "classes" && classes.length) {
-      if (role === "SCHOOL_ADMIN" && selectedClass()) {
+      if (isSiteOperator && selectedClass()) {
         return classManagementView(selectedClass());
       }
       return `
@@ -4114,7 +4182,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         </div>
       `;
     }
-    if (section.id === "students" && role === "SCHOOL_ADMIN") {
+    if (section.id === "students" && isSiteOperator) {
       return studentRosterList(rows);
     }
     if (section.id === "notifications") {
@@ -4132,7 +4200,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     if (section.id === "attendance" && role === "PARENT") {
       return attendanceList();
     }
-    if (section.id === "attendance" && role === "SCHOOL_ADMIN") {
+    if (section.id === "attendance" && isSiteOperator) {
       return adminAttendanceGrid(rows);
     }
     if (section.id === "payments" && role === "PARENT") {
@@ -4442,6 +4510,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           <button class="secondary-button compact-button" data-class-pricing-id="${escapeHtml(classRecord.id)}" type="button">Configure price</button>
           <button class="secondary-button compact-button" data-class-public-link-id="${escapeHtml(classRecord.id)}" type="button">Copy public link</button>
           <button class="secondary-button compact-button" data-class-assign-teacher type="button">Assign teacher</button>
+          <button class="secondary-button compact-button" data-class-invite-teacher type="button">Invite teacher</button>
           <button
             class="secondary-button compact-button"
             data-class-close-enrollment-id="${escapeHtml(classRecord.id)}"
@@ -5640,10 +5709,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     const cachedClasses = classListCache.get(cacheKey);
     if (cachedClasses && Date.now() - cachedClasses.loadedAt < CLASS_LIST_CACHE_TTL_MS) {
       applyLoadedClasses(cachedClasses.response);
-      if (role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "intro" && selectedSiteId && selectedClassId) {
+      if (isSchoolAdmin && adminMode === "checkIn" && checkInFlowStage === "intro" && selectedSiteId && selectedClassId) {
         await loadTodayCheckIns();
       }
-      if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && selectedAttendanceClassId && !attendanceGrid) {
+      if (isSiteOperator && activeSectionId === "attendance" && selectedAttendanceClassId && !attendanceGrid) {
         await loadAttendanceGrid();
       }
       return;
@@ -5670,10 +5739,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       loadingClasses = false;
       render();
     }
-    if (role === "SCHOOL_ADMIN" && adminMode === "checkIn" && checkInFlowStage === "intro" && selectedSiteId && selectedClassId) {
+    if (isSchoolAdmin && adminMode === "checkIn" && checkInFlowStage === "intro" && selectedSiteId && selectedClassId) {
       await loadTodayCheckIns();
     }
-    if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && selectedAttendanceClassId && !attendanceGrid) {
+    if (isSiteOperator && activeSectionId === "attendance" && selectedAttendanceClassId && !attendanceGrid) {
       await loadAttendanceGrid();
     }
   }
@@ -5701,7 +5770,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   async function loadClassTeachers() {
-    if (loadingClassTeachers || !school?.tenantId || role !== "SCHOOL_ADMIN" || !selectedClassId) {
+    if (loadingClassTeachers || !school?.tenantId || !isSiteOperator || !selectedClassId) {
       return;
     }
     const classId = selectedClassId;
@@ -5793,7 +5862,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       selectedAttendanceClassId = "";
       attendanceGrid = null;
     }
-    if (role === "SCHOOL_ADMIN" && activeSectionId === "attendance" && !selectedAttendanceClassId && classes.length) {
+    if (isSiteOperator && activeSectionId === "attendance" && !selectedAttendanceClassId && classes.length) {
       selectedAttendanceClassId = classes[0].id;
     }
     classRows = classes.length
@@ -5845,12 +5914,12 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   async function loadStudents() {
-    if (loadingStudents || !school?.tenantId || role !== "SCHOOL_ADMIN") {
+    if (loadingStudents || !school?.tenantId || !isSiteOperator || !selectedSiteId) {
       return;
     }
     loadingStudents = true;
     try {
-      const response = await listStudents(school.tenantId, selectedStudentClassId);
+      const response = await listStudents(school.tenantId, selectedStudentClassId, selectedSiteId);
       students = response.students || [];
       error = "";
     } catch (loadError) {
@@ -5896,7 +5965,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   async function loadAttendanceGrid() {
-    if (loadingAttendance || !school?.tenantId || role !== "SCHOOL_ADMIN" || !selectedAttendanceClassId) {
+    if (loadingAttendance || !school?.tenantId || !isSiteOperator || !selectedAttendanceClassId) {
       return;
     }
     loadingAttendance = true;
@@ -6896,11 +6965,11 @@ function toolbarFor(section) {
 }
 
 function panelHeaderAction(section, role) {
-  if (role !== "SCHOOL_ADMIN") {
+  if (!["SCHOOL_ADMIN", "SITE_MANAGER"].includes(role)) {
     return "";
   }
   const addActions = {
-    sites: "Add site",
+    ...(role === "SCHOOL_ADMIN" ? { sites: "Add site" } : {}),
     programs: "Add program",
     classes: "Add class",
   };
@@ -7210,6 +7279,9 @@ function operationDescription(section, action) {
   if (isNotificationOperation(action)) {
     return "Upload an .eml template, review recipients, send a test email, then confirm the final BCC send.";
   }
+  if (isInviteTeacherOperation(action)) {
+    return "Send a teacher invitation for the selected class.";
+  }
   if (isCreateChildOperation(action)) {
     return "Add a student profile for your family.";
   }
@@ -7277,6 +7349,11 @@ function isPricingOperation(action) {
 function isAssignTeacherOperation(action) {
   const normalized = action.toLowerCase();
   return normalized.includes("teacher") && normalized.includes("assign");
+}
+
+function isInviteTeacherOperation(action) {
+  const normalized = action.toLowerCase();
+  return normalized.includes("teacher") && normalized.includes("invite");
 }
 
 function isNotificationOperation(action) {
