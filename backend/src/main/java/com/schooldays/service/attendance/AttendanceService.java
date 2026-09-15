@@ -94,6 +94,34 @@ public class AttendanceService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Attendance check-in could not be loaded"));
     }
 
+    @Transactional
+    public AttendanceResponse staffCheckIn(
+            UUID checkedInByUserId,
+            String checkedInByRole,
+            AttendanceCheckInRequest request
+    ) {
+        ClassesRecord classRecord = attendanceDao.findActiveClass(request.tenantId(), request.classId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found"));
+        if (!attendanceDao.hasActiveEnrollment(request.tenantId(), request.childId(), request.classId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Student must be enrolled in this class before check-in");
+        }
+        validateClassDate(classRecord, request.classDate());
+        attendanceDao.checkIn(
+                request.tenantId(),
+                request.childId(),
+                request.classId(),
+                request.classDate(),
+                checkedInByUserId,
+                checkedInByRole,
+                OffsetDateTime.now()
+        );
+        cacheService.clearAttendanceCaches(request.tenantId());
+        return listClassAttendance(request.tenantId(), request.classId(), request.classDate()).attendance().stream()
+                .filter(entry -> entry.childId().equals(request.childId()))
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Attendance check-in could not be loaded"));
+    }
+
     private void validateParentCheckInWindow(LocalDate classDate, ZoneId zoneId) {
         LocalDate today = LocalDate.now(clock.withZone(zoneId));
         LocalDate earliest = today.minusDays(1);
@@ -152,6 +180,16 @@ public class AttendanceService {
     @Transactional(readOnly = true)
     public AttendanceListResponse listClassAttendance(UUID classId, LocalDate classDate) {
         return cacheService.getClassAttendance(classId, classDate, () -> fetchClassAttendance(classId, classDate));
+    }
+
+    @Transactional(readOnly = true)
+    public AttendanceListResponse listClassAttendance(UUID tenantId, UUID classId, LocalDate classDate) {
+        return cacheService.getClassAttendance(classId, classDate, () -> attendanceDao.listClassAttendance(tenantId, classId, classDate).stream()
+                .map(AttendanceResponse::from)
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        Collectors.toList(),
+                        AttendanceListResponse::new
+                )));
     }
 
     private AttendanceListResponse fetchClassAttendance(UUID classId, LocalDate classDate) {

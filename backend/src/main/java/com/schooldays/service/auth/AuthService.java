@@ -494,7 +494,6 @@ public class AuthService {
 
         cacheService.clearClassCaches(tenantId);
         cacheService.clearAttendanceCaches(tenantId);
-        cacheService.clearExternalCheckInCaches(tenantId);
         return new EndpointStatusResponse("success", "DELETE /api/tenants/{tenantId}/users", "User removed from this school.");
     }
 
@@ -839,7 +838,6 @@ public class AuthService {
         dsl.execute("delete from tenant_invitations where invited_by_user_id = ? or admin_email = ?", userId, email);
         dsl.execute("delete from teacher_assignments where teacher_user_id = ? or assigned_by_user_id = ?", userId, userId);
         dsl.execute("delete from user_roles where user_id = ?", userId);
-        dsl.execute("delete from external_check_ins where checked_in_by_user_id = ?", userId);
         dsl.execute("delete from email_notification_history where sender_user_id = ?", userId);
         dsl.execute("delete from notification_providers where created_by_user_id = ?", userId);
         dsl.execute("delete from payment_receipts where uploaded_by_user_id = ? or reviewed_by_user_id = ?", userId, userId);

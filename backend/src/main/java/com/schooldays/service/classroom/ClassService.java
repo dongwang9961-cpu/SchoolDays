@@ -199,7 +199,6 @@ public class ClassService {
     private void invalidateClassDependentCaches(UUID tenantId) {
         cacheService.clearClassCaches(tenantId);
         cacheService.clearAttendanceCaches(tenantId);
-        cacheService.clearExternalCheckInCaches(tenantId);
     }
 
     private void requireTenant(UUID tenantId) {

@@ -137,6 +137,14 @@ public class AttendanceDao {
         );
     }
 
+    public List<Record> listClassAttendance(UUID tenantId, UUID classId, LocalDate classDate) {
+        return listAttendanceWhere(
+                ATTENDANCE.TENANT_ID.eq(tenantId),
+                ATTENDANCE.CLASS_ID.eq(classId),
+                ATTENDANCE.CLASS_DATE.eq(classDate)
+        );
+    }
+
     public List<Record> listClassRoster(UUID tenantId, UUID classId) {
         return dsl.select(
                         CHILDREN.ID,

@@ -3,6 +3,7 @@ package com.schooldays.security;
 import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
 import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
 import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
+import static com.schooldays.jooq.generated.tables.TeacherAssignments.TEACHER_ASSIGNMENTS;
 
 import java.util.List;
 import java.util.UUID;
@@ -11,6 +12,7 @@ import com.schooldays.dao.auth.RoleDao;
 import com.schooldays.dao.auth.UserDao;
 import com.schooldays.entities.auth.TenantRole;
 import org.jooq.DSLContext;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
@@ -22,6 +24,7 @@ public class TenantSecurity {
     private final RoleDao roleDao;
     private final DSLContext dsl;
 
+    @Autowired
     public TenantSecurity(UserDao userDao, RoleDao roleDao, DSLContext dsl) {
         this.userDao = userDao;
         this.roleDao = roleDao;
@@ -80,6 +83,21 @@ public class TenantSecurity {
         return canManageSite(authentication, tenantId, siteId);
     }
 
+    public boolean canCheckInClass(Authentication authentication, UUID tenantId, UUID classId) {
+        if (canManageClass(authentication, tenantId, classId)) {
+            return true;
+        }
+        if (tenantId == null || classId == null || dsl == null
+                || !hasTenantRole(authentication, tenantId, "TEACHER")) {
+            return false;
+        }
+        UUID userId = userId(authentication);
+        return userId != null && dsl.fetchExists(dsl.selectOne()
+                .from(TEACHER_ASSIGNMENTS)
+                .where(TEACHER_ASSIGNMENTS.CLASS_ID.eq(classId))
+                .and(TEACHER_ASSIGNMENTS.TEACHER_USER_ID.eq(userId)));
+    }
+
     public List<UUID> siteManagerSiteIds(Authentication authentication, UUID tenantId) {
         if (tenantId == null) {
             return List.of();
@@ -107,6 +125,17 @@ public class TenantSecurity {
             return List.of();
         }
         return roleDao.findTenantRoles(userId);
+    }
+
+    private UUID userId(Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof Jwt jwt)) {
+            return null;
+        }
+        try {
+            return UUID.fromString(jwt.getSubject());
+        } catch (Exception exception) {
+            return null;
+        }
     }
 
     private boolean roleMatches(String actualRole, String[] allowedRoles) {

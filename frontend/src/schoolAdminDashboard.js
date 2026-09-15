@@ -1,7 +1,7 @@
 import { escapeHtml } from "./authPage.js";
 import { changePassword, getProfile, updateProfile } from "./api/account.js";
-import { deleteUser, importExternalStudents, inviteUsers, listExternalStudents, sendPasswordResetLinks } from "./api/auth.js";
-import { checkInAttendance, checkInExternalStudent, getClassAttendanceGrid, listExternalCheckIns, listExternalCheckInCounts, listParentAttendance } from "./api/attendance.js";
+import { deleteUser, inviteUsers, listStudentsForCheckIn, sendPasswordResetLinks } from "./api/auth.js";
+import { checkInAttendance, checkInStudent, getClassAttendanceGrid, listClassCheckIns, listClassAttendanceCounts, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, listTeacherClasses, stopClass, updateClass } from "./api/classes.js";
 import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
@@ -369,7 +369,7 @@ let checkInSpeechUnlocked = false;
 let checkInBarcodeValue = "";
 let checkInManualStudentId = "";
 let checkInLastRawBarcodeValue = "";
-let checkInExternalCheckInSubmitting = false;
+let checkInSubmitting = false;
 let checkInQuickListOpen = false;
 let checkInQuickListMessage = "";
 let checkInQuickListError = "";
@@ -1071,8 +1071,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
               <small>Invite school administrators, teachers, or parents from one place.</small>
             </button>
             <button class="admin-choice-card" data-admin-mode="externalAttendance" type="button">
-              <span>External attendance</span>
-              <strong>Check external student attendance</strong>
+              <span>Attendance</span>
+              <strong>Review student attendance</strong>
               <small>Choose a site and class, then open the attendance calendar.</small>
             </button>
           </div>
@@ -1511,35 +1511,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
               </div>
             </div>
 
-            <div class="check-in-action-group">
-              <div class="check-in-action-group-header">
-                <h3>Import students</h3>
-                <p>Upload CSV or Excel files into external students.</p>
-              </div>
-              <form class="check-in-import-form" data-check-in-import-form>
-                <label class="check-in-import-field">
-                  <span>File</span>
-                  <input
-                    accept=".csv,.xlsx,.xls,.xlsm,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    data-check-in-import-file
-                    type="file"
-                  />
-                </label>
-                <p class="check-in-import-file-name" data-check-in-import-file-name>${escapeHtml(checkInImportFile?.name || "No file selected")}</p>
-                ${checkInImportError ? `<p class="message error" role="alert">${escapeHtml(checkInImportError)}</p>` : ""}
-                ${checkInImportMessage ? `<p class="message success" role="status">${escapeHtml(checkInImportMessage)}</p>` : ""}
-                <div class="check-in-launch-actions">
-                  <button class="secondary-button compact-button" data-check-in-import-submit type="submit">
-                    ${checkInImportSubmitting ? "Importing..." : "Import file"}
-                  </button>
-                </div>
-              </form>
-            </div>
-
             <div class="check-in-action-group check-in-action-group-compact">
               <div class="check-in-action-group-header">
                 <h3>Student list</h3>
-                <p>Open the spreadsheet view of imported students.</p>
+                <p>Open the spreadsheet view of students enrolled in this class.</p>
               </div>
               <div class="check-in-launch-actions">
                 <button class="secondary-button compact-button" data-check-in-show-all type="button">
@@ -1614,13 +1589,6 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     root.querySelector("[data-check-in-print-sheet]")?.addEventListener("click", handlePrintCheckOutSheet);
     root.querySelector("[data-check-in-show-all]")?.addEventListener("click", handleShowCheckInStudents);
     bindQuickCheckInControls();
-    root.querySelector("[data-check-in-import-file]")?.addEventListener("change", (event) => {
-      checkInImportFile = event.currentTarget.files?.[0] || null;
-      checkInImportError = "";
-      checkInImportMessage = "";
-      updateCheckInImportFileLabel();
-    });
-    root.querySelector("[data-check-in-import-form]")?.addEventListener("submit", handleCheckInImportSubmit);
     root.querySelector("[data-check-in-students-modal]")?.addEventListener("click", (event) => {
       if (event.target === event.currentTarget) {
         closeCheckInStudentsModal();
@@ -1652,52 +1620,12 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     onLogout();
   }
 
-  async function handleCheckInImportSubmit(event) {
-    event.preventDefault();
-    if (!checkInImportFile) {
-      checkInImportError = "Choose a CSV or Excel file first.";
-      checkInImportMessage = "";
+  async function handleShowCheckInStudents() {
+    if (!selectedClassId) {
+      checkInStudentsError = "Select a class before opening the student list.";
       render();
       return;
     }
-
-    checkInImportSubmitting = true;
-    checkInImportError = "";
-    checkInImportMessage = "";
-    render();
-
-    try {
-      const response = await importExternalStudents({
-        tenantId: school.tenantId,
-        file: checkInImportFile,
-      });
-      const summaryParts = [
-        `${response.importedCount || 0} imported`,
-        `${response.updatedCount || 0} updated`,
-        `${response.skippedCount || 0} skipped`,
-      ];
-      checkInImportMessage = `Import complete: ${summaryParts.join(", ")}.`;
-      checkInImportFile = null;
-      updateCheckInImportFileLabel();
-      invalidateExternalStudentListCache();
-      checkInStudents = [];
-      checkInStudentsTotalRows = 0;
-      checkInStudentsPage = 1;
-      checkInStudentsPageSize = 25;
-      checkInStudentsTotalPages = 1;
-      if (checkInStudentsOpen || checkInQuickListOpen) {
-        await loadCheckInStudents({ force: true });
-      }
-    } catch (importError) {
-      checkInImportMessage = "";
-      checkInImportError = importError instanceof Error ? importError.message : "Import could not be completed.";
-    } finally {
-      checkInImportSubmitting = false;
-      render();
-    }
-  }
-
-  async function handleShowCheckInStudents() {
     resetQuickCheckInState();
     checkInStudentsOpen = true;
     checkInStudentsError = "";
@@ -1911,13 +1839,13 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
     if (!selectedClassId) {
       checkInQuickListError = role === "TEACHER"
-        ? "Select a class before checking in external students."
-        : "Select a site and class before checking in external students.";
+        ? "Select a class before checking in students."
+        : "Select a site and class before checking in students.";
       checkInQuickListMessage = "";
       render();
       return;
     }
-    if (checkInExternalCheckInSubmitting) {
+    if (checkInSubmitting) {
       return;
     }
     if (!quickCheckInStatusLoaded()) {
@@ -2119,7 +2047,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     checkInStudentsLoading = true;
     render();
     try {
-      const response = await listExternalStudents({ tenantId: school.tenantId });
+      const response = await listStudentsForCheckIn({
+        tenantId: school.tenantId,
+        classId: selectedClassId || "",
+      });
       applyLoadedCheckInStudents(response);
       writeExternalStudentListCache(response);
       externalStudentListLoadedFromBackend = true;
@@ -2160,7 +2091,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       render();
     }
     try {
-      const response = await listExternalCheckIns({
+      const response = await listClassCheckIns({
         tenantId: school.tenantId,
         classId: selectedClassId,
         checkDate: queryDate,
@@ -2197,8 +2128,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         <section class="check-in-students-panel" role="dialog" aria-modal="true" aria-labelledby="check-in-students-title">
           <div class="workspace-heading workspace-heading-row">
             <div>
-              <h3 id="check-in-students-title">External students</h3>
-              <p>${escapeHtml(checkInStudentsLoading ? "Loading imported students..." : `${(checkInStudentsTotalRows || checkInStudents.length)} student${(checkInStudentsTotalRows || checkInStudents.length) === 1 ? "" : "s"}.`)}</p>
+              <h3 id="check-in-students-title">Students</h3>
+              <p>${escapeHtml(checkInStudentsLoading ? "Loading enrolled students..." : `${(checkInStudentsTotalRows || checkInStudents.length)} student${(checkInStudentsTotalRows || checkInStudents.length) === 1 ? "" : "s"}.`)}</p>
               <p class="check-in-selection-count" data-check-in-selection-count>${escapeHtml(`${checkInStudentsSelectedCount} student${checkInStudentsSelectedCount === 1 ? "" : "s"} selected.`)}</p>
             </div>
             <div class="check-in-students-actions">
@@ -2354,7 +2285,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       ],
       height: "100%",
       layout: "fitDataFill",
-      placeholder: checkInStudentsLoading ? "Loading..." : "No external students imported yet.",
+      placeholder: checkInStudentsLoading ? "Loading..." : "No enrolled students found.",
       movableColumns: true,
       selectableRows: true,
       columnDefaults: {
@@ -2400,7 +2331,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             const isSubmitting = Boolean(checkInQuickSubmittingStudentId && checkInQuickSubmittingStudentId === studentId);
             const alreadyCheckedIn = Boolean(studentId && checkedInStudentIds.has(studentId));
             const waitingForStatus = !statusLoaded;
-            const disabled = !studentId || waitingForStatus || alreadyCheckedIn || isSubmitting || checkInExternalCheckInSubmitting;
+            const disabled = !studentId || waitingForStatus || alreadyCheckedIn || isSubmitting || checkInSubmitting;
             const label = alreadyCheckedIn
               ? "Checked in"
               : isSubmitting
@@ -2432,7 +2363,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       ],
       height: "100%",
       layout: "fitDataFill",
-      placeholder: checkInStudentsLoading ? "Loading..." : "No external students imported yet.",
+      placeholder: checkInStudentsLoading ? "Loading..." : "No enrolled students found.",
       movableColumns: true,
       columnDefaults: {
         vertAlign: "middle",
@@ -3315,7 +3246,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     checkInScannerMode = "native";
     checkInFallbackCanvas = null;
     checkInFallbackContext = null;
-    checkInExternalCheckInSubmitting = false;
+    checkInSubmitting = false;
     if (checkInScannerTimer) {
       clearTimeout(checkInScannerTimer);
       checkInScannerTimer = null;
@@ -3593,11 +3524,11 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
     if (!selectedClassId) {
       updateCheckInStatus(role === "TEACHER"
-        ? "Select a class before checking in external students."
-        : "Select a site and class before checking in external students.", true);
+        ? "Select a class before checking in students."
+        : "Select a site and class before checking in students.", true);
       return;
     }
-    if (checkInExternalCheckInSubmitting) {
+    if (checkInSubmitting) {
       return;
     }
 
@@ -3657,21 +3588,21 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }) {
     if (!selectedClassId) {
       updateCheckInStatus(role === "TEACHER"
-        ? "Select a class before checking in external students."
-        : "Select a site and class before checking in external students.", true);
+        ? "Select a class before checking in students."
+        : "Select a site and class before checking in students.", true);
       return false;
     }
-    if (checkInExternalCheckInSubmitting) {
+    if (checkInSubmitting) {
       return false;
     }
 
-    checkInExternalCheckInSubmitting = true;
-    updateCheckInStatus("Saving external check-in...");
+    checkInSubmitting = true;
+    updateCheckInStatus("Saving check-in...");
 
     try {
       const site = selectedSite();
       const checkDate = formatLocalDateForTimezone(new Date(), site?.timezone);
-      const response = await checkInExternalStudent({
+      const response = await checkInStudent({
         tenantId: school.tenantId,
         externalStudentId,
         classId: selectedClassId,
@@ -3705,7 +3636,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         ? "This student has already checked in."
         : checkInError instanceof Error
           ? checkInError.message
-          : "External check-in could not be saved.";
+          : "Student check-in could not be saved.";
       playCheckInFailureSound();
       updateCheckInStatus(message, true);
       if (alreadyCheckedIn) {
@@ -3719,7 +3650,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       }
       return false;
     } finally {
-      checkInExternalCheckInSubmitting = false;
+      checkInSubmitting = false;
     }
   }
 
@@ -4870,7 +4801,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     externalAttendanceStage = "calendar";
     render();
     try {
-      const response = await listExternalCheckIns({
+      const response = await listClassCheckIns({
         tenantId: school.tenantId,
         classId: selectedClassId,
         checkDate: dateValue,
@@ -4932,7 +4863,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     externalAttendanceCountError = "";
     render();
     try {
-      const response = await listExternalCheckInCounts({
+      const response = await listClassAttendanceCounts({
         tenantId: school.tenantId,
         classId: selectedClassId,
         startDate: classRecord.startDate,
@@ -6312,7 +6243,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         <button class="${teacherMode === "choice" ? "is-active" : ""}" data-teacher-mode="choice" type="button">Choice screen</button>
         <button class="${teacherMode === "main" ? "is-active" : ""}" type="button" disabled>Main UI</button>
         <button class="${teacherMode === "checkIn" ? "is-active" : ""}" data-teacher-mode="checkIn" type="button">Check in</button>
-        <button class="${teacherMode === "externalAttendance" ? "is-active" : ""}" data-teacher-mode="externalAttendance" type="button">External attendance</button>
+        <button class="${teacherMode === "externalAttendance" ? "is-active" : ""}" data-teacher-mode="externalAttendance" type="button">Attendance</button>
       </div>
     `;
   }
@@ -6344,7 +6275,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
               <small>Choose one of your classes and start the check-in camera flow.</small>
             </button>
             <button class="admin-choice-card" data-teacher-enter-external-attendance type="button">
-              <span>External attendance</span>
+              <span>Attendance</span>
               <strong>Open attendance calendar</strong>
               <small>Review external student attendance for one of your classes.</small>
             </button>
@@ -6572,8 +6503,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           <header class="app-header">
             <div>
               <p class="eyebrow">${escapeHtml(school.name)}</p>
-              <h2 id="external-attendance-title">External attendance</h2>
-              <p>Choose a class, then open the external student attendance calendar.</p>
+          <h2 id="external-attendance-title">Attendance</h2>
+          <p>Choose a class, then open the student attendance calendar.</p>
             </div>
             <div class="header-actions">
               <button class="secondary-button compact-button" data-external-attendance-back type="button">Back</button>
@@ -6675,7 +6606,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           <header class="app-header">
             <div>
               <p class="eyebrow">${escapeHtml(school.name)}</p>
-              <h2 id="external-attendance-calendar-title">External attendance</h2>
+              <h2 id="external-attendance-calendar-title">Attendance</h2>
               <p>${escapeHtml(classRecord ? `${classRecord.name} - ${enrollmentDateRange(classRecord)}` : "Choose a class to open the attendance calendar.")}</p>
             </div>
             <div class="header-actions">
@@ -6684,7 +6615,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             </div>
           </header>
 
-          <div class="attendance-calendar-panel external-attendance-calendar-panel" aria-label="External student attendance calendar">
+          <div class="attendance-calendar-panel external-attendance-calendar-panel" aria-label="Student attendance calendar">
           <div class="attendance-calendar-legend">
             <span><i class="calendar-key checked"></i>Has check-ins</span>
             <span><i class="calendar-key scheduled"></i>Class day</span>

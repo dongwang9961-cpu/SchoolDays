@@ -10,8 +10,6 @@ import java.util.function.Supplier;
 import com.schooldays.dto.attendance.AttendanceGridResponse;
 import com.schooldays.dto.attendance.AttendanceListResponse;
 import com.schooldays.dto.classroom.ClassListResponse;
-import com.schooldays.dto.externalcheckin.ExternalCheckInDateCountResponse;
-import com.schooldays.dto.externalcheckin.ExternalCheckInListResponse;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -26,8 +24,6 @@ public class SchoolDataCacheService {
     private final Map<ClassAttendanceCacheKey, AttendanceListResponse> classAttendance = new ConcurrentHashMap<>();
     private final Map<ClassAttendanceGridCacheKey, AttendanceGridResponse> classAttendanceGrids = new ConcurrentHashMap<>();
 
-    private final Map<ExternalCheckInListCacheKey, ExternalCheckInListResponse> externalCheckInLists = new ConcurrentHashMap<>();
-    private final Map<ExternalCheckInCountCacheKey, List<ExternalCheckInDateCountResponse>> externalCheckInCounts = new ConcurrentHashMap<>();
 
     public ClassListResponse getClassList(UUID tenantId, UUID siteId, Supplier<ClassListResponse> loader) {
         return classLists.computeIfAbsent(new ClassListCacheKey(tenantId, siteId), ignored -> loader.get());
@@ -65,35 +61,6 @@ public class SchoolDataCacheService {
         return classAttendanceGrids.computeIfAbsent(new ClassAttendanceGridCacheKey(tenantId, classId), ignored -> loader.get());
     }
 
-    public ExternalCheckInListResponse getExternalCheckInList(
-            UUID tenantId,
-            UUID classId,
-            LocalDate checkDate,
-            UUID checkedInByUserId,
-            String checkedInByRole,
-            Supplier<ExternalCheckInListResponse> loader
-    ) {
-        return externalCheckInLists.computeIfAbsent(
-                new ExternalCheckInListCacheKey(tenantId, classId, checkDate, checkedInByUserId, checkedInByRole),
-                ignored -> loader.get()
-        );
-    }
-
-    public List<ExternalCheckInDateCountResponse> getExternalCheckInCounts(
-            UUID tenantId,
-            UUID classId,
-            LocalDate startDate,
-            LocalDate endDate,
-            UUID checkedInByUserId,
-            String checkedInByRole,
-            Supplier<List<ExternalCheckInDateCountResponse>> loader
-    ) {
-        return externalCheckInCounts.computeIfAbsent(
-                new ExternalCheckInCountCacheKey(tenantId, classId, startDate, endDate, checkedInByUserId, checkedInByRole),
-                ignored -> List.copyOf(loader.get())
-        );
-    }
-
     public void clearClassCaches(UUID tenantId) {
         classLists.keySet().removeIf(key -> key.tenantId().equals(tenantId));
         availableClassLists.keySet().removeIf(key -> key.tenantId().equals(tenantId));
@@ -107,11 +74,6 @@ public class SchoolDataCacheService {
         classAttendanceGrids.keySet().removeIf(key -> key.tenantId().equals(tenantId));
     }
 
-    public void clearExternalCheckInCaches(UUID tenantId) {
-        externalCheckInLists.keySet().removeIf(key -> key.tenantId().equals(tenantId));
-        externalCheckInCounts.keySet().removeIf(key -> key.tenantId().equals(tenantId));
-    }
-
     public void clearAll() {
         classLists.clear();
         availableClassLists.clear();
@@ -120,8 +82,6 @@ public class SchoolDataCacheService {
         parentChildAttendance.clear();
         classAttendance.clear();
         classAttendanceGrids.clear();
-        externalCheckInLists.clear();
-        externalCheckInCounts.clear();
     }
 
     private record ClassListCacheKey(UUID tenantId, UUID siteId) {
@@ -145,22 +105,4 @@ public class SchoolDataCacheService {
     private record ClassAttendanceGridCacheKey(UUID tenantId, UUID classId) {
     }
 
-    private record ExternalCheckInListCacheKey(
-            UUID tenantId,
-            UUID classId,
-            LocalDate checkDate,
-            UUID checkedInByUserId,
-            String checkedInByRole
-    ) {
-    }
-
-    private record ExternalCheckInCountCacheKey(
-            UUID tenantId,
-            UUID classId,
-            LocalDate startDate,
-            LocalDate endDate,
-            UUID checkedInByUserId,
-            String checkedInByRole
-    ) {
-    }
 }
