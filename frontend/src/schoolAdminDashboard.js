@@ -272,7 +272,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let loadingChildren = false;
   let enrollments = [];
   let selectedEnrollmentId = "";
-  let parentEnrollmentTab = "current";
+  let parentEnrollmentTabs = new Map();
   let loadingEnrollments = false;
   let pendingEnrollmentRequests = [];
   let loadingPendingEnrollmentRequests = false;
@@ -985,9 +985,16 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     });
     root.querySelectorAll("[data-parent-enrollment-tab]").forEach((button) => {
       button.addEventListener("click", () => {
-          parentEnrollmentTab = ["current", "pending", "history"].includes(button.dataset.parentEnrollmentTab)
+        const childId = button.dataset.parentEnrollmentChildId;
+        if (!childId) {
+          return;
+        }
+        parentEnrollmentTabs.set(
+          childId,
+          ["current", "pending", "history"].includes(button.dataset.parentEnrollmentTab)
             ? button.dataset.parentEnrollmentTab
-            : "current";
+            : "current"
+        );
         render();
       });
     });
@@ -4216,6 +4223,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function familyChildCard(child) {
+    const enrollmentTab = parentEnrollmentTabs.get(child.id) || "current";
     const currentEnrollments = currentParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
     const pendingEnrollments = pendingParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
     const historyEnrollments = parentEnrollmentHistory().filter((enrollment) => enrollment.childId === child.id);
@@ -4236,30 +4244,33 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         </header>
         <div class="family-enrollment-tabs" role="tablist" aria-label="${escapeHtml(`${child.firstName} ${child.lastName} enrollments`.trim())}">
           <button
-            class="secondary-button compact-button ${parentEnrollmentTab === "current" ? "is-active" : ""}"
+            class="secondary-button compact-button ${enrollmentTab === "current" ? "is-active" : ""}"
             data-parent-enrollment-tab="current"
+            data-parent-enrollment-child-id="${escapeHtml(child.id)}"
             type="button"
           >
             Current enrolled classes
           </button>
           <button
-            class="secondary-button compact-button ${parentEnrollmentTab === "pending" ? "is-active" : ""}"
+            class="secondary-button compact-button ${enrollmentTab === "pending" ? "is-active" : ""}"
             data-parent-enrollment-tab="pending"
+            data-parent-enrollment-child-id="${escapeHtml(child.id)}"
             type="button"
           >
             Pending requests
           </button>
           <button
-            class="secondary-button compact-button ${parentEnrollmentTab === "history" ? "is-active" : ""}"
+            class="secondary-button compact-button ${enrollmentTab === "history" ? "is-active" : ""}"
             data-parent-enrollment-tab="history"
+            data-parent-enrollment-child-id="${escapeHtml(child.id)}"
             type="button"
           >
             Enrollment history
           </button>
         </div>
-        ${parentEnrollmentTab === "history"
+        ${enrollmentTab === "history"
           ? familyClassList("Enrollment history", historyEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No enrollment history.")
-          : parentEnrollmentTab === "pending"
+          : enrollmentTab === "pending"
             ? familyClassList("Pending requests", pendingEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No pending enrollment requests.")
             : familyClassList("Current enrolled classes", currentEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current enrolled classes.")}
         ${familyClassList("Open classes", availableClasses.map((classRecord) => availableClassSummary(classRecord, child.id)), "No additional open classes right now.")}
