@@ -1,5 +1,7 @@
 package com.schooldays.service.enrollment;
 
+import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
+
 import java.time.OffsetDateTime;
 import java.util.HashSet;
 import java.util.List;
@@ -10,6 +12,7 @@ import com.schooldays.dao.enrollment.EnrollmentDao;
 import com.schooldays.dto.enrollment.CreateEnrollmentRequest;
 import com.schooldays.dto.enrollment.CreateEnrollmentResponse;
 import com.schooldays.dto.enrollment.EnrollmentListResponse;
+import com.schooldays.dto.enrollment.EnrollmentRequestResponse;
 import com.schooldays.dto.enrollment.EnrollmentResponse;
 import com.schooldays.jooq.generated.tables.records.ClassFeeItemsRecord;
 import com.schooldays.jooq.generated.tables.records.ClassesRecord;
@@ -41,9 +44,61 @@ public class EnrollmentService {
     @Transactional(readOnly = true)
     public EnrollmentListResponse listParentEnrollments(UUID tenantId, UUID parentUserId) {
         List<EnrollmentResponse> enrollments = enrollmentDao.listParentEnrollments(tenantId, parentUserId).stream()
-                .map(record -> EnrollmentResponse.from(record, enrollmentDao.selectedOptionalFeeItemIds(record.getId())))
+                .map(record -> {
+                    EnrollmentsRecord enrollment = record.into(EnrollmentsRecord.class);
+                    return EnrollmentResponse.from(
+                            enrollment,
+                            enrollmentDao.selectedOptionalFeeItemIds(enrollment.getId()),
+                            record.get(CLASSES.NAME),
+                            record.get(CLASSES.START_DATE),
+                            record.get(CLASSES.END_DATE)
+                    );
+                })
                 .toList();
         return new EnrollmentListResponse(enrollments);
+    }
+
+    @Transactional(readOnly = true)
+    public List<EnrollmentRequestResponse> listPendingSiteEnrollments(UUID tenantId, UUID siteId) {
+        return enrollmentDao.listPendingSiteEnrollments(tenantId, siteId).stream()
+                .map(record -> {
+                    String firstName = record.get(com.schooldays.jooq.generated.tables.Children.CHILDREN.FIRST_NAME);
+                    String lastName = record.get(com.schooldays.jooq.generated.tables.Children.CHILDREN.LAST_NAME);
+                    return new EnrollmentRequestResponse(
+                            record.get(com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS.ID),
+                            record.get(com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS.CHILD_ID),
+                            String.join(" ", firstName == null ? "" : firstName, lastName == null ? "" : lastName).trim(),
+                            record.get(com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS.CLASS_ID),
+                            record.get(com.schooldays.jooq.generated.tables.Classes.CLASSES.NAME),
+                            record.get(com.schooldays.jooq.generated.tables.Classes.CLASSES.START_DATE),
+                            record.get(com.schooldays.jooq.generated.tables.Classes.CLASSES.END_DATE),
+                            record.get(com.schooldays.jooq.generated.tables.Users.USERS.EMAIL),
+                            record.get(com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS.ENROLLMENT_STATUS),
+                            record.get(com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS.CREATED_AT)
+                    );
+                })
+                .toList();
+    }
+
+    @Transactional
+    public void approveEnrollment(UUID tenantId, UUID enrollmentId) {
+        EnrollmentsRecord enrollment = enrollmentDao.findPendingEnrollment(tenantId, enrollmentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pending enrollment request was not found"));
+        ClassesRecord classRecord = enrollmentDao.findActiveClass(tenantId, enrollment.getClassId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found"));
+        int capacity = classRecord.getCapacity() == null ? Integer.MAX_VALUE : classRecord.getCapacity();
+        if (enrollmentDao.activeEnrollmentCount(tenantId, enrollment.getClassId()) >= capacity) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This class has no available seats");
+        }
+        enrollmentDao.updateEnrollmentStatus(tenantId, enrollmentId, "enrolled", OffsetDateTime.now());
+        cacheService.clearAttendanceCaches(tenantId);
+    }
+
+    @Transactional
+    public void rejectEnrollment(UUID tenantId, UUID enrollmentId) {
+        enrollmentDao.findPendingEnrollment(tenantId, enrollmentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pending enrollment request was not found"));
+        enrollmentDao.updateEnrollmentStatus(tenantId, enrollmentId, "rejected", OffsetDateTime.now());
     }
 
     @Transactional
@@ -57,7 +112,7 @@ public class EnrollmentService {
 
         ClassesRecord classRecord = enrollmentDao.findActiveClass(tenantId, classId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class was not found"));
-        if (classRecord.getRegistrationClosesAt() != null && classRecord.getRegistrationClosesAt().isBefore(OffsetDateTime.now())) {
+        if (!isRegistrationOpen(classRecord, OffsetDateTime.now())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Registration is closed for this class");
         }
 
@@ -87,7 +142,7 @@ public class EnrollmentService {
                 .findFirst()
                 .map(item -> item.getMetadata() == null ? "USD" : "USD")
                 .orElse("USD");
-        String status = requiredFeeTotal > 0 ? "pending_payment" : "enrolled";
+        String status = "pending";
 
         Set<UUID> optionalFeeItemIds = new HashSet<>(request.optionalFeeItemIds() == null ? List.of() : request.optionalFeeItemIds());
         Set<UUID> validOptionalFeeItemIds = feeItems.stream()
@@ -117,5 +172,16 @@ public class EnrollmentService {
 
         cacheService.clearAttendanceCaches(tenantId);
         return new CreateEnrollmentResponse(responses, requiredFeeTotal > 0, requiredFeeTotal, currency);
+    }
+
+    private boolean isRegistrationOpen(ClassesRecord classRecord, OffsetDateTime now) {
+        if (classRecord.getRegistrationOpensAt() != null
+                && classRecord.getRegistrationOpensAt().isAfter(now)) {
+            return false;
+        }
+        if (classRecord.getRegistrationClosesAt() != null) {
+            return !classRecord.getRegistrationClosesAt().isBefore(now);
+        }
+        return classRecord.getEndDate() != null && !classRecord.getEndDate().isBefore(now.toLocalDate());
     }
 }

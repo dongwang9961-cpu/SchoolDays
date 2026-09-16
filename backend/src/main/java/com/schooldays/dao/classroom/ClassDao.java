@@ -7,6 +7,7 @@ import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.OffsetDateTime;
 
 import com.schooldays.jooq.generated.tables.records.ClassesRecord;
 import org.jooq.DSLContext;
@@ -33,7 +34,7 @@ public class ClassDao {
                 .fetchInto(CLASSES);
     }
 
-    public List<ClassesRecord> findActiveByTenant(UUID tenantId) {
+    public List<ClassesRecord> findAvailableForRegistration(UUID tenantId, OffsetDateTime now) {
         return dsl.select(CLASSES.fields())
                 .from(CLASSES)
                 .join(PROGRAMS).on(PROGRAMS.ID.eq(CLASSES.PROGRAM_ID))
@@ -42,6 +43,12 @@ public class ClassDao {
                 .and(CLASSES.STATUS.eq("active"))
                 .and(PROGRAMS.STATUS.eq("active"))
                 .and(SCHOOL_SITES.STATUS.eq("active"))
+                .and(CLASSES.REGISTRATION_OPENS_AT.isNull()
+                        .or(CLASSES.REGISTRATION_OPENS_AT.le(now)))
+                .and(CLASSES.REGISTRATION_CLOSES_AT.isNotNull()
+                        .and(CLASSES.REGISTRATION_CLOSES_AT.ge(now))
+                        .or(CLASSES.REGISTRATION_CLOSES_AT.isNull()
+                                .and(CLASSES.END_DATE.ge(now.toLocalDate()))))
                 .orderBy(CLASSES.START_DATE.asc(), CLASSES.SEQ_ID.asc())
                 .fetchInto(CLASSES);
     }

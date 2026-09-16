@@ -6,6 +6,8 @@ import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
 import static com.schooldays.jooq.generated.tables.Children.CHILDREN;
 import static com.schooldays.jooq.generated.tables.EnrollmentPerks.ENROLLMENT_PERKS;
 import static com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS;
+import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
+import static com.schooldays.jooq.generated.tables.Users.USERS;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -18,6 +20,7 @@ import com.schooldays.jooq.generated.tables.records.ChildrenRecord;
 import com.schooldays.jooq.generated.tables.records.EnrollmentsRecord;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
+import org.jooq.Record;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -55,6 +58,49 @@ public class EnrollmentDao {
         );
     }
 
+    public List<? extends Record> listPendingSiteEnrollments(UUID tenantId, UUID siteId) {
+        return dsl.select(
+                        ENROLLMENTS.ID,
+                        ENROLLMENTS.CHILD_ID,
+                        ENROLLMENTS.CLASS_ID,
+                        ENROLLMENTS.ENROLLMENT_STATUS,
+                        ENROLLMENTS.CREATED_AT,
+                        CHILDREN.FIRST_NAME,
+                        CHILDREN.LAST_NAME,
+                        CLASSES.NAME,
+                        CLASSES.START_DATE,
+                        CLASSES.END_DATE,
+                        USERS.EMAIL
+                )
+                .from(ENROLLMENTS)
+                .join(CHILDREN).on(CHILDREN.ID.eq(ENROLLMENTS.CHILD_ID))
+                .join(CLASSES).on(CLASSES.ID.eq(ENROLLMENTS.CLASS_ID))
+                .join(PROGRAMS).on(PROGRAMS.ID.eq(CLASSES.PROGRAM_ID))
+                .join(USERS).on(USERS.ID.eq(CHILDREN.PARENT_USER_ID))
+                .where(ENROLLMENTS.TENANT_ID.eq(tenantId))
+                .and(PROGRAMS.SITE_ID.eq(siteId))
+                .and(ENROLLMENTS.ENROLLMENT_STATUS.eq("pending"))
+                .orderBy(ENROLLMENTS.CREATED_AT.asc(), ENROLLMENTS.SEQ_ID.asc())
+                .fetch();
+    }
+
+    public Optional<EnrollmentsRecord> findPendingEnrollment(UUID tenantId, UUID enrollmentId) {
+        return dsl.selectFrom(ENROLLMENTS)
+                .where(ENROLLMENTS.TENANT_ID.eq(tenantId))
+                .and(ENROLLMENTS.ID.eq(enrollmentId))
+                .and(ENROLLMENTS.ENROLLMENT_STATUS.eq("pending"))
+                .fetchOptional();
+    }
+
+    public void updateEnrollmentStatus(UUID tenantId, UUID enrollmentId, String status, OffsetDateTime now) {
+        dsl.update(ENROLLMENTS)
+                .set(ENROLLMENTS.ENROLLMENT_STATUS, status)
+                .set(ENROLLMENTS.UPDATED_AT, now)
+                .where(ENROLLMENTS.TENANT_ID.eq(tenantId))
+                .and(ENROLLMENTS.ID.eq(enrollmentId))
+                .execute();
+    }
+
     public boolean enrollmentExists(UUID tenantId, UUID childId, UUID classId) {
         return dsl.fetchExists(dsl.selectOne()
                 .from(ENROLLMENTS)
@@ -75,14 +121,16 @@ public class EnrollmentDao {
                 .fetchInto(CLASS_FEE_ITEMS);
     }
 
-    public List<EnrollmentsRecord> listParentEnrollments(UUID tenantId, UUID parentUserId) {
+    public List<Record> listParentEnrollments(UUID tenantId, UUID parentUserId) {
         return dsl.select(ENROLLMENTS.fields())
+                .select(CLASSES.NAME, CLASSES.START_DATE, CLASSES.END_DATE)
                 .from(ENROLLMENTS)
                 .join(CHILDREN).on(CHILDREN.ID.eq(ENROLLMENTS.CHILD_ID))
+                .join(CLASSES).on(CLASSES.ID.eq(ENROLLMENTS.CLASS_ID))
                 .where(ENROLLMENTS.TENANT_ID.eq(tenantId))
                 .and(CHILDREN.PARENT_USER_ID.eq(parentUserId))
                 .orderBy(ENROLLMENTS.CREATED_AT.desc(), ENROLLMENTS.SEQ_ID.desc())
-                .fetchInto(ENROLLMENTS);
+                .fetch();
     }
 
     public List<UUID> selectedOptionalFeeItemIds(UUID enrollmentId) {

@@ -4,7 +4,7 @@ import { deleteUser, inviteUsers, listStudentsForCheckIn, sendPasswordResetLinks
 import { checkInAttendance, checkInStudent, getClassAttendanceGrid, listClassCheckIns, listClassAttendanceCounts, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, listTeacherClasses, stopClass, updateClass } from "./api/classes.js";
-import { createEnrollment, listParentEnrollments } from "./api/enrollments.js";
+import { approveEnrollmentRequest, createEnrollment, listParentEnrollments, listPendingEnrollmentRequests, rejectEnrollmentRequest } from "./api/enrollments.js";
 import { getClassPricing, getTenantClassPricing, saveClassPricing } from "./api/pricing.js";
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
 import { createSite, listSites, updateSite } from "./api/sites.js";
@@ -108,7 +108,7 @@ const schoolAdminSiteSections = [
 ];
 
 const siteManagerSiteSections = schoolAdminSiteSections.filter((section) =>
-  ["programs", "classes", "students", "teachers", "attendance"].includes(section.id)
+  ["programs", "classes", "students", "teachers", "enrollments", "attendance"].includes(section.id)
 );
 
 const teacherSections = [
@@ -272,7 +272,10 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let loadingChildren = false;
   let enrollments = [];
   let selectedEnrollmentId = "";
+  let parentEnrollmentTab = "current";
   let loadingEnrollments = false;
+  let pendingEnrollmentRequests = [];
+  let loadingPendingEnrollmentRequests = false;
   let attendanceRecords = [];
   let attendanceGrid = null;
   let selectedAttendanceClassId = "";
@@ -572,8 +575,12 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           loadStudents();
         }
         if (activeSectionId === "enrollments") {
-          loadEnrollments();
-          loadAttendance();
+          if (role === "PARENT") {
+            loadEnrollments();
+            loadAttendance();
+          } else if (isSiteOperator) {
+            loadPendingEnrollmentRequests();
+          }
         }
         if (activeSectionId === "attendance") {
           if (role === "PARENT") {
@@ -833,6 +840,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         render();
         loadPrograms();
         loadClasses();
+        loadPendingEnrollmentRequests();
       });
     });
     root.querySelectorAll("[data-program-id]").forEach((button) => {
@@ -973,6 +981,19 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         notice = "";
         error = "";
         render();
+      });
+    });
+    root.querySelectorAll("[data-parent-enrollment-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+          parentEnrollmentTab = ["current", "pending", "history"].includes(button.dataset.parentEnrollmentTab)
+            ? button.dataset.parentEnrollmentTab
+            : "current";
+        render();
+      });
+    });
+    root.querySelectorAll("[data-enrollment-request-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await handleEnrollmentRequestAction(button.dataset.enrollmentRequestAction, button.dataset.enrollmentRequestId);
       });
     });
     root.querySelectorAll("[data-child-edit-id]").forEach((button) => {
@@ -3962,6 +3983,12 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       }
       return enrollments.length ? [] : ["No enrollments yet."];
     }
+    if (section.id === "enrollments" && isSiteOperator) {
+      if (loadingPendingEnrollmentRequests) {
+        return ["Loading pending enrollment requests..."];
+      }
+      return pendingEnrollmentRequests.length ? [] : ["No pending enrollment requests."];
+    }
     if (section.id === "attendance" && role === "PARENT") {
       if (loadingAttendance) {
         return ["Loading attendance..."];
@@ -4128,6 +4155,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         ${enrollmentList(rows)}
       `;
     }
+    if (section.id === "enrollments" && isSiteOperator) {
+      return pendingEnrollmentRequestList();
+    }
     if (section.id === "attendance" && role === "PARENT") {
       return attendanceList();
     }
@@ -4159,13 +4189,13 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         </div>
       `;
     }
-    const activeEnrollments = activeParentEnrollments();
+    const currentEnrollments = currentParentEnrollments();
     const openClasses = classes.filter((classRecord) => !isEnrollmentClosed(classRecord));
     return `
       <section class="family-overview" aria-label="Family overview">
         <div class="family-overview-metrics" aria-label="Family summary">
           ${familyMetric("Children", children.length)}
-          ${familyMetric("Current registrations", activeEnrollments.length)}
+          ${familyMetric("Current enrolled classes", currentEnrollments.length)}
           ${familyMetric("Open classes", openClasses.length)}
           ${familyMetric("Pending payments", pendingPaymentEnrollments().length)}
         </div>
@@ -4186,7 +4216,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function familyChildCard(child) {
-    const childEnrollments = activeParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
+    const currentEnrollments = currentParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
+    const pendingEnrollments = pendingParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
+    const historyEnrollments = parentEnrollmentHistory().filter((enrollment) => enrollment.childId === child.id);
     const availableClasses = availableClassesForChild(child.id);
     const details = [
       child.dateOfBirth ? `DOB ${formatDate(child.dateOfBirth)}` : "",
@@ -4202,7 +4234,34 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             <p>${escapeHtml(details.join(" - ") || "Student profile")}</p>
           </div>
         </header>
-        ${familyClassList("Registered classes", childEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current registrations.")}
+        <div class="family-enrollment-tabs" role="tablist" aria-label="${escapeHtml(`${child.firstName} ${child.lastName} enrollments`.trim())}">
+          <button
+            class="secondary-button compact-button ${parentEnrollmentTab === "current" ? "is-active" : ""}"
+            data-parent-enrollment-tab="current"
+            type="button"
+          >
+            Current enrolled classes
+          </button>
+          <button
+            class="secondary-button compact-button ${parentEnrollmentTab === "pending" ? "is-active" : ""}"
+            data-parent-enrollment-tab="pending"
+            type="button"
+          >
+            Pending requests
+          </button>
+          <button
+            class="secondary-button compact-button ${parentEnrollmentTab === "history" ? "is-active" : ""}"
+            data-parent-enrollment-tab="history"
+            type="button"
+          >
+            Enrollment history
+          </button>
+        </div>
+        ${parentEnrollmentTab === "history"
+          ? familyClassList("Enrollment history", historyEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No enrollment history.")
+          : parentEnrollmentTab === "pending"
+            ? familyClassList("Pending requests", pendingEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No pending enrollment requests.")
+            : familyClassList("Current enrolled classes", currentEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current enrolled classes.")}
         ${familyClassList("Open classes", availableClasses.map((classRecord) => availableClassSummary(classRecord, child.id)), "No additional open classes right now.")}
       </article>
     `;
@@ -4285,10 +4344,14 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
   function enrolledClassSummary(enrollment) {
     const classRecord = classes.find((item) => item.id === enrollment.classId);
+    const className = classRecord?.name || enrollment.className || "Class";
+    const dateRange = classRecord
+      ? enrollmentDateRange(classRecord)
+      : [enrollment.classStartDate, enrollment.classEndDate].filter(Boolean).map(formatDate).join(" - ") || "Date range unavailable";
     return `
       <div class="family-class-row">
-        <strong>${escapeHtml(classRecord?.name || "Class")}</strong>
-        <span>${escapeHtml(classRecord ? `${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}` : "Class details unavailable")}</span>
+        <strong>${escapeHtml(className)}</strong>
+        <span>${escapeHtml(dateRange + (classRecord ? ` - ${classScheduleText(classRecord)}` : ""))}</span>
         <small>${escapeHtml(statusLabel(enrollment.status || "enrolled"))}</small>
       </div>
     `;
@@ -4329,6 +4392,30 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     return enrollments.filter((enrollment) =>
       !["cancelled", "rejected"].includes(String(enrollment.status || "").toLowerCase())
     );
+  }
+
+  function currentParentEnrollments() {
+    const today = localDateValue(new Date());
+    return activeParentEnrollments().filter((enrollment) => {
+      if (String(enrollment.status || "").toLowerCase() === "pending") {
+        return false;
+      }
+      const classRecord = classes.find((item) => item.id === enrollment.classId);
+      const endDate = classRecord?.endDate || enrollment.classEndDate;
+      return !endDate || endDate >= today;
+    });
+  }
+
+  function pendingParentEnrollments() {
+    return enrollments.filter((enrollment) => String(enrollment.status || "").toLowerCase() === "pending");
+  }
+
+  function parentEnrollmentHistory() {
+    const visibleIds = new Set([
+      ...currentParentEnrollments().map((enrollment) => enrollment.id),
+      ...pendingParentEnrollments().map((enrollment) => enrollment.id),
+    ]);
+    return enrollments.filter((enrollment) => !visibleIds.has(enrollment.id));
   }
 
   function notificationList(rows) {
@@ -4553,10 +4640,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     if (!enrollments.length) {
       return "";
     }
-    const activeCount = enrollments.filter((enrollment) => !["cancelled", "rejected"].includes(String(enrollment.status || "").toLowerCase())).length;
+    const currentCount = currentParentEnrollments().length;
     return `
       <p class="context-note">
-        ${escapeHtml(`${activeCount} active registration${activeCount === 1 ? "" : "s"} across ${enrollments.length} total enrollment record${enrollments.length === 1 ? "" : "s"}.`)}
+        ${escapeHtml(`${currentCount} current enrolled class${currentCount === 1 ? "" : "es"} across ${enrollments.length} total enrollment record${enrollments.length === 1 ? "" : "s"}.`)}
       </p>
     `;
   }
@@ -4594,6 +4681,37 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
         }
       </div>
+    `;
+  }
+
+  function pendingEnrollmentRequestList() {
+    return `
+      <section class="family-class-section">
+        <h5>Pending requests</h5>
+        <div class="data-list enrollment-request-list">
+          ${pendingEnrollmentRequests.length
+            ? pendingEnrollmentRequests.map((request) => `
+              <div class="data-row enrollment-request-row">
+                <div>
+                  <strong>${escapeHtml(request.childName || "Student")}</strong>
+                  <span>${escapeHtml(request.parentEmail || "Parent email unavailable")}</span>
+                </div>
+                <div>
+                  <strong>${escapeHtml(request.className || "Class")}</strong>
+                  <span>${escapeHtml(`${request.classStartDate || "Date unavailable"}${request.classEndDate ? ` - ${request.classEndDate}` : ""}`)}</span>
+                </div>
+                <div>
+                  <span>${escapeHtml(`Requested ${formatDate(request.requestedAt) || "date unavailable"}`)}</span>
+                  <div class="row-actions">
+                    <button class="secondary-button compact-button" data-enrollment-request-action="approve" data-enrollment-request-id="${escapeHtml(request.id)}" type="button">Approve</button>
+                    <button class="secondary-button compact-button" data-enrollment-request-action="reject" data-enrollment-request-id="${escapeHtml(request.id)}" type="button">Reject</button>
+                  </div>
+                </div>
+              </div>
+            `).join("")
+            : `<p class="context-note">No pending enrollment requests.</p>`}
+        </div>
+      </section>
     `;
   }
 
@@ -5548,13 +5666,22 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function isEnrollmentClosed(classRecord) {
+    return !isRegistrationOpen(classRecord);
+  }
+
+  function isRegistrationOpen(classRecord) {
     if (String(classRecord?.status || "").toLowerCase() !== "active") {
-      return true;
-    }
-    if (!classRecord?.registrationClosesAt) {
       return false;
     }
-    return new Date(classRecord.registrationClosesAt).getTime() <= Date.now();
+    const now = Date.now();
+    if (classRecord?.registrationOpensAt
+        && new Date(classRecord.registrationOpensAt).getTime() > now) {
+      return false;
+    }
+    if (classRecord?.registrationClosesAt) {
+      return new Date(classRecord.registrationClosesAt).getTime() >= now;
+    }
+    return Boolean(classRecord?.endDate && classRecord.endDate >= localDateValue(new Date()));
   }
 
   function dateFromLocalValue(value) {
@@ -5573,6 +5700,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     resetClasses();
     resetStudents();
     resetAttendanceGrid();
+    pendingEnrollmentRequests = [];
+    loadingPendingEnrollmentRequests = false;
   }
 
   function resetPrograms() {
@@ -5874,6 +6003,47 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       error = loadError instanceof Error ? loadError.message : "Enrollments could not be loaded.";
     } finally {
       loadingEnrollments = false;
+      render();
+    }
+  }
+
+  async function loadPendingEnrollmentRequests() {
+    if (loadingPendingEnrollmentRequests || !school?.tenantId || !isSiteOperator || !selectedSiteId) {
+      return;
+    }
+    loadingPendingEnrollmentRequests = true;
+    try {
+      pendingEnrollmentRequests = await listPendingEnrollmentRequests(school.tenantId, selectedSiteId);
+      error = "";
+    } catch (loadError) {
+      pendingEnrollmentRequests = [];
+      error = loadError instanceof Error ? loadError.message : "Pending enrollment requests could not be loaded.";
+    } finally {
+      loadingPendingEnrollmentRequests = false;
+      render();
+    }
+  }
+
+  async function handleEnrollmentRequestAction(action, enrollmentId) {
+    if (!enrollmentId || !school?.tenantId) {
+      return;
+    }
+    try {
+      if (action === "reject" && !window.confirm("Reject this enrollment request?")) {
+        return;
+      }
+      if (action === "approve") {
+        await approveEnrollmentRequest(school.tenantId, enrollmentId);
+        notice = "Enrollment request approved.";
+      } else {
+        await rejectEnrollmentRequest(school.tenantId, enrollmentId);
+        notice = "Enrollment request rejected.";
+      }
+      error = "";
+      await loadPendingEnrollmentRequests();
+    } catch (actionError) {
+      notice = "";
+      error = actionError instanceof Error ? actionError.message : "Enrollment request could not be updated.";
       render();
     }
   }

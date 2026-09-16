@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -154,5 +155,39 @@ class ClassServiceTests {
                 .singleElement()
                 .extracting("name")
                 .isEqualTo("Intermediate Drawing");
+    }
+
+    @Test
+    void listsOnlyClassesWithinTheirRegistrationWindow() {
+        OffsetDateTime now = OffsetDateTime.now();
+        LocalDate today = LocalDate.now();
+
+        insertClass("Ended class", today.minusDays(1), null, null);
+        insertClass("Not yet open", today.plusDays(10), now.plusDays(1), now.plusDays(2));
+        insertClass("Open class", today.plusDays(10), null, null);
+        insertClass("Open until close", today.plusDays(10), now.minusDays(1), now.plusDays(1));
+
+        assertThat(classService.listAvailableClasses(tenantId).classes())
+                .extracting("name")
+                .containsExactly("Open class", "Open until close");
+    }
+
+    private void insertClass(
+            String name,
+            LocalDate endDate,
+            OffsetDateTime registrationOpensAt,
+            OffsetDateTime registrationClosesAt
+    ) {
+        dsl.insertInto(CLASSES)
+                .set(CLASSES.ID, UUID.randomUUID())
+                .set(CLASSES.TENANT_ID, tenantId)
+                .set(CLASSES.PROGRAM_ID, programId)
+                .set(CLASSES.NAME, name)
+                .set(CLASSES.START_DATE, LocalDate.now().minusDays(1))
+                .set(CLASSES.END_DATE, endDate)
+                .set(CLASSES.REGISTRATION_OPENS_AT, registrationOpensAt)
+                .set(CLASSES.REGISTRATION_CLOSES_AT, registrationClosesAt)
+                .set(CLASSES.STATUS, "active")
+                .execute();
     }
 }

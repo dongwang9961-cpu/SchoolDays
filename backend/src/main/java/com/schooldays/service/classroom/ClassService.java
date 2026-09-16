@@ -59,10 +59,8 @@ public class ClassService {
     }
 
     public ClassListResponse listAvailableClasses(UUID tenantId) {
-        return cacheService.getAvailableClassList(tenantId, () -> {
-            requireTenant(tenantId);
-            return fetchAvailableClasses(tenantId);
-        });
+        requireTenant(tenantId);
+        return fetchAvailableClasses(tenantId, OffsetDateTime.now());
     }
 
     public ClassListResponse listTeacherClasses(UUID tenantId, UUID teacherUserId) {
@@ -80,8 +78,8 @@ public class ClassService {
         return new ClassListResponse(classes);
     }
 
-    private ClassListResponse fetchAvailableClasses(UUID tenantId) {
-        List<ClassResponse> classes = classDao.findActiveByTenant(tenantId)
+    private ClassListResponse fetchAvailableClasses(UUID tenantId, OffsetDateTime now) {
+        List<ClassResponse> classes = classDao.findAvailableForRegistration(tenantId, now)
                 .stream()
                 .map(ClassResponse::from)
                 .toList();

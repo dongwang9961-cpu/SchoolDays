@@ -18,6 +18,7 @@ import com.schooldays.dto.api.EndpointStatusResponse;
 import com.schooldays.dto.enrollment.CreateEnrollmentRequest;
 import com.schooldays.dto.enrollment.CreateEnrollmentResponse;
 import com.schooldays.dto.enrollment.EnrollmentListResponse;
+import com.schooldays.dto.enrollment.EnrollmentRequestResponse;
 import com.schooldays.dto.pricing.ClassPricingResponse;
 import com.schooldays.entities.auth.AuthenticatedUser;
 import com.schooldays.service.enrollment.EnrollmentService;
@@ -52,6 +53,35 @@ public class EnrollmentController extends ApiPlaceholderSupport {
             Authentication authentication
     ) {
         return ResponseEntity.ok(enrollmentService.createParentEnrollment(this.userId(authentication), request));
+    }
+
+    @GetMapping("/api/tenants/{tenantId}/enrollment-requests")
+    @PreAuthorize("@tenantSecurity.canManageSite(authentication, #tenantId, #siteId)")
+    public ResponseEntity<java.util.List<EnrollmentRequestResponse>> listPendingEnrollmentRequests(
+            @PathVariable("tenantId") UUID tenantId,
+            @RequestParam("siteId") UUID siteId
+    ) {
+        return ResponseEntity.ok(enrollmentService.listPendingSiteEnrollments(tenantId, siteId));
+    }
+
+    @PostMapping("/api/tenants/{tenantId}/enrollment-requests/{enrollmentId}/approve")
+    @PreAuthorize("@tenantSecurity.canManageEnrollment(authentication, #tenantId, #enrollmentId)")
+    public ResponseEntity<EndpointStatusResponse> approveEnrollment(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID enrollmentId
+    ) {
+        enrollmentService.approveEnrollment(tenantId, enrollmentId);
+        return ResponseEntity.ok(new EndpointStatusResponse("approved", "POST /api/tenants/{tenantId}/enrollment-requests/{enrollmentId}/approve", "Enrollment request approved."));
+    }
+
+    @PostMapping("/api/tenants/{tenantId}/enrollment-requests/{enrollmentId}/reject")
+    @PreAuthorize("@tenantSecurity.canManageEnrollment(authentication, #tenantId, #enrollmentId)")
+    public ResponseEntity<EndpointStatusResponse> rejectEnrollment(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID enrollmentId
+    ) {
+        enrollmentService.rejectEnrollment(tenantId, enrollmentId);
+        return ResponseEntity.ok(new EndpointStatusResponse("rejected", "POST /api/tenants/{tenantId}/enrollment-requests/{enrollmentId}/reject", "Enrollment request rejected."));
     }
 
     @GetMapping("/api/classes/{classId}/available-dates")

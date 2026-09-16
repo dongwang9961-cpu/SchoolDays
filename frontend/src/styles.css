@@ -1180,6 +1180,18 @@ button:disabled {
   gap: 8px;
 }
 
+.family-enrollment-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.family-enrollment-tabs .secondary-button.is-active {
+  background: #e8f1ff;
+  border-color: #78a9e8;
+  color: #1554a0;
+}
+
 .family-class-section h5 {
   color: #344258;
   font-size: 0.85rem;
@@ -1223,6 +1235,24 @@ button:disabled {
 
 .family-class-row small {
   color: #6a7890;
+}
+
+.enrollment-request-row {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(180px, auto);
+}
+
+.enrollment-request-row > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.enrollment-request-row span {
+  color: #4d5d73;
+  overflow-wrap: anywhere;
 }
 
 .family-open-class-row {

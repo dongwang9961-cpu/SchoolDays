@@ -4,6 +4,7 @@ import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
 import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
 import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 import static com.schooldays.jooq.generated.tables.TeacherAssignments.TEACHER_ASSIGNMENTS;
+import static com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS;
 
 import java.util.List;
 import java.util.UUID;
@@ -96,6 +97,18 @@ public class TenantSecurity {
                 .from(TEACHER_ASSIGNMENTS)
                 .where(TEACHER_ASSIGNMENTS.CLASS_ID.eq(classId))
                 .and(TEACHER_ASSIGNMENTS.TEACHER_USER_ID.eq(userId)));
+    }
+
+    public boolean canManageEnrollment(Authentication authentication, UUID tenantId, UUID enrollmentId) {
+        if (tenantId == null || enrollmentId == null || dsl == null) {
+            return false;
+        }
+        UUID classId = dsl.select(ENROLLMENTS.CLASS_ID)
+                .from(ENROLLMENTS)
+                .where(ENROLLMENTS.TENANT_ID.eq(tenantId))
+                .and(ENROLLMENTS.ID.eq(enrollmentId))
+                .fetchOne(ENROLLMENTS.CLASS_ID);
+        return canManageClass(authentication, tenantId, classId);
     }
 
     public List<UUID> siteManagerSiteIds(Authentication authentication, UUID tenantId) {
