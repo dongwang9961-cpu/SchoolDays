@@ -255,6 +255,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let classRows = null;
   let classes = [];
   let selectedClassId = "";
+  let classDetailOpen = false;
   let selectedClassPricing = null;
   let loadingClasses = false;
   let loadingClassPricing = false;
@@ -549,6 +550,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     root.querySelectorAll("[data-section-id]").forEach((button) => {
       button.addEventListener("click", () => {
         activeSectionId = button.dataset.sectionId;
+        if (activeSectionId === "classes") {
+          classDetailOpen = false;
+        }
         activeOperation = "";
         notice = "";
         error = "";
@@ -872,6 +876,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     root.querySelectorAll("[data-class-id]").forEach((button) => {
       button.addEventListener("click", () => {
         selectedClassId = button.dataset.classId;
+        classDetailOpen = true;
         selectedClassPricing = null;
         classTeachers = [];
         notice = "";
@@ -885,6 +890,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     });
     root.querySelector("[data-class-detail-back]")?.addEventListener("click", () => {
       selectedClassId = "";
+      classDetailOpen = false;
       selectedClassPricing = null;
       classTeachers = [];
       activeOperation = "";
@@ -895,6 +901,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     root.querySelectorAll("[data-class-edit-id]").forEach((button) => {
       button.addEventListener("click", () => {
         selectedClassId = button.dataset.classEditId;
+        classDetailOpen = true;
         selectedClassPricing = null;
         activeOperation = "Edit selected class";
         notice = "";
@@ -905,6 +912,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     root.querySelectorAll("[data-class-pricing-id]").forEach((button) => {
       button.addEventListener("click", () => {
         selectedClassId = button.dataset.classPricingId;
+        classDetailOpen = true;
         selectedClassPricing = null;
         activeOperation = "Configure pricing";
         notice = "";
@@ -4105,7 +4113,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       `;
     }
     if (section.id === "classes" && classes.length) {
-      if (isSiteOperator && selectedClass()) {
+      if (isSiteOperator && classDetailOpen && selectedClass()) {
         return classManagementView(selectedClass());
       }
       return `
@@ -5725,6 +5733,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     classRows = null;
     classes = [];
     selectedClassId = "";
+    classDetailOpen = false;
     selectedClassPricing = null;
     classTeachers = [];
     loadingClassTeachers = false;
