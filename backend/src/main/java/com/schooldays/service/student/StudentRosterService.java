@@ -29,6 +29,17 @@ public class StudentRosterService {
     }
 
     public StudentRosterResponse listActiveClassStudents(UUID tenantId, UUID classId, UUID siteId) {
+        return listClassStudents(tenantId, classId, siteId, "active", null);
+    }
+
+    public StudentRosterResponse listClassStudents(
+            UUID tenantId, UUID classId, UUID siteId, String group, Integer year) {
+        if (!"active".equalsIgnoreCase(group) && !"current".equalsIgnoreCase(group) && !"history".equalsIgnoreCase(group)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Student group must be active, current, or history");
+        }
+        if ("history".equalsIgnoreCase(group) && year == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "History student group requires a year");
+        }
         if (siteId != null && !studentRosterDao.siteBelongsToTenant(tenantId, siteId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Site was not found");
         }
@@ -38,7 +49,7 @@ public class StudentRosterService {
         if (classId != null && siteId != null && !studentRosterDao.classBelongsToSite(tenantId, classId, siteId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Class does not belong to the selected site");
         }
-        List<StudentRosterRowResponse> students = studentRosterDao.listActiveClassStudents(tenantId, classId, siteId)
+        List<StudentRosterRowResponse> students = studentRosterDao.listClassStudents(tenantId, classId, siteId, group, year)
                 .stream()
                 .map(StudentRosterRowResponse::from)
                 .toList();

@@ -264,6 +264,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let loadingClassTeachers = false;
   let students = [];
   let selectedStudentClassId = "";
+  let studentTab = "active";
   let loadingStudents = false;
   let notificationProviders = [];
   let notificationHistory = [];
@@ -965,6 +966,15 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       students = [];
       render();
       loadStudents();
+    });
+    root.querySelectorAll("[data-student-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        studentTab = button.dataset.studentTab || "active";
+        selectedStudentClassId = "";
+        students = [];
+        render();
+        loadStudents();
+      });
     });
     root.querySelector("[data-attendance-class-filter]")?.addEventListener("change", (event) => {
       selectedAttendanceClassId = event.currentTarget.value;
@@ -4506,15 +4516,29 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function studentRosterList(rows) {
-    const activeClasses = classes.filter((classRecord) => String(classRecord.status || "").toLowerCase() === "active");
+    const { currentYear, lastYear } = studentHistoryYears();
+    const visibleClasses = classes.filter((classRecord) => {
+      if (studentTab === "active") return isCurrentClass(classRecord);
+      return isHistoryClass(classRecord) && classOverlapsYear(classRecord, studentTab === "history-current" ? currentYear : lastYear);
+    });
+    const selectedClassStillVisible = visibleClasses.some((classRecord) => classRecord.id === selectedStudentClassId);
+    const selectedClassId = selectedClassStillVisible ? selectedStudentClassId : "";
+    const tabLabel = studentTab === "active"
+      ? "Active classes"
+      : `History classes (${studentTab === "history-current" ? currentYear : lastYear})`;
     return `
+      <div class="workspace-tabs" role="tablist" aria-label="Student class status">
+        <button class="workspace-tab ${studentTab === "active" ? "is-active" : ""}" data-student-tab="active" role="tab" aria-selected="${studentTab === "active"}" type="button">Active classes</button>
+        <button class="workspace-tab ${studentTab === "history-current" ? "is-active" : ""}" data-student-tab="history-current" role="tab" aria-selected="${studentTab === "history-current"}" type="button">History classes (${currentYear})</button>
+        <button class="workspace-tab ${studentTab === "history-last" ? "is-active" : ""}" data-student-tab="history-last" role="tab" aria-selected="${studentTab === "history-last"}" type="button">History classes (${lastYear})</button>
+      </div>
       <div class="list-filter-bar">
         <label>
           <span>Class</span>
           <select data-student-class-filter>
-            <option value="">All active classes</option>
-            ${activeClasses.map((classRecord) => `
-              <option value="${escapeHtml(classRecord.id)}" ${selectedStudentClassId === classRecord.id ? "selected" : ""}>
+            <option value="">All ${escapeHtml(tabLabel.toLowerCase())}</option>
+            ${visibleClasses.map((classRecord) => `
+              <option value="${escapeHtml(classRecord.id)}" ${selectedClassId === classRecord.id ? "selected" : ""}>
                 ${escapeHtml(classRecord.name)}
               </option>
             `).join("")}
@@ -5735,6 +5759,18 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     return !isCurrentClass(classRecord);
   }
 
+  function studentHistoryYears() {
+    const currentYear = new Date().getFullYear();
+    return { currentYear, lastYear: currentYear - 1 };
+  }
+
+  function classOverlapsYear(classRecord, year) {
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    return (!classRecord.startDate || classRecord.startDate <= yearEnd)
+      && (!classRecord.endDate || classRecord.endDate >= yearStart);
+  }
+
   function isRegistrationOpen(classRecord) {
     if (String(classRecord?.status || "").toLowerCase() !== "active") {
       return false;
@@ -6047,7 +6083,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
     loadingStudents = true;
     try {
-      const response = await listStudents(school.tenantId, selectedStudentClassId, selectedSiteId);
+      const { currentYear, lastYear } = studentHistoryYears();
+      const year = studentTab === "history-current" ? currentYear : studentTab === "history-last" ? lastYear : "";
+      const group = studentTab === "active" ? "current" : "history";
+      const response = await listStudents(school.tenantId, selectedStudentClassId, selectedSiteId, group, year);
       students = response.students || [];
       error = "";
     } catch (loadError) {

@@ -7,6 +7,7 @@ import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
 import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 import static com.schooldays.jooq.generated.tables.Users.USERS;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -48,10 +49,30 @@ public class StudentRosterDao {
     }
 
     public List<? extends Record> listActiveClassStudents(UUID tenantId, UUID classId, UUID siteId) {
+        return listClassStudents(tenantId, classId, siteId, "active", null);
+    }
+
+    public List<? extends Record> listClassStudents(
+            UUID tenantId, UUID classId, UUID siteId, String group, Integer year) {
         Condition condition = ENROLLMENTS.TENANT_ID.eq(tenantId)
                 .and(CHILDREN.STATUS.eq("active"))
-                .and(CLASSES.STATUS.eq("active"))
                 .and(ENROLLMENTS.ENROLLMENT_STATUS.notIn("cancelled", "rejected"));
+        if ("history".equalsIgnoreCase(group)) {
+            LocalDate today = LocalDate.now();
+            LocalDate yearStart = LocalDate.of(year, 1, 1);
+            LocalDate yearEnd = LocalDate.of(year, 12, 31);
+            condition = condition
+                    .and(CLASSES.STATUS.ne("active").or(CLASSES.END_DATE.lt(today)))
+                    .and(CLASSES.START_DATE.le(yearEnd))
+                    .and(CLASSES.END_DATE.ge(yearStart));
+        } else if ("current".equalsIgnoreCase(group)) {
+            LocalDate today = LocalDate.now();
+            condition = condition
+                    .and(CLASSES.STATUS.eq("active"))
+                    .and(CLASSES.END_DATE.isNull().or(CLASSES.END_DATE.ge(today)));
+        } else {
+            condition = condition.and(CLASSES.STATUS.eq("active"));
+        }
         if (classId != null) {
             condition = condition.and(ENROLLMENTS.CLASS_ID.eq(classId));
         }
