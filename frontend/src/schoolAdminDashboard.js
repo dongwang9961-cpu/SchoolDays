@@ -263,6 +263,8 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let classTeachers = [];
   let loadingClassTeachers = false;
   let students = [];
+  const studentRosterCache = new Map();
+  const studentRosterLoadingKeys = new Set();
   let selectedStudentClassId = "";
   let studentTab = "active";
   let loadingStudents = false;
@@ -314,6 +316,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let externalAttendanceDetailQueryKey = "";
   let externalAttendanceDetailOpen = false;
   let externalAttendanceDetailTabulator = null;
+  let studentRosterTabulator = null;
   let externalAttendanceCountRows = [];
   let externalAttendanceCountLoading = false;
   let externalAttendanceCountError = "";
@@ -429,6 +432,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
     if (!checkInQuickListOpen) {
       destroyQuickCheckInTabulator();
+    }
+    if (activeSectionId !== "students") {
+      destroyStudentRosterTabulator();
     }
     if (role === "TEACHER" && teacherMode === "choice") {
       renderTeacherChoiceScreen();
@@ -967,6 +973,13 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       render();
       loadStudents();
     });
+    root.querySelector("[data-student-refresh]")?.addEventListener("click", () => {
+      const cacheKey = studentRosterCacheKey();
+      studentRosterCache.delete(cacheKey);
+      students = [];
+      render();
+      loadStudents({ force: true });
+    });
     root.querySelectorAll("[data-student-tab]").forEach((button) => {
       button.addEventListener("click", () => {
         studentTab = button.dataset.studentTab || "active";
@@ -1059,7 +1072,94 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
     initializeGooglePlacesAutocomplete(root);
     initializeAttendanceGridTable(root);
+    void initializeStudentRosterTabulator();
     root.querySelector("[data-gmail-connect]")?.addEventListener("click", connectGmail);
+  }
+
+  function destroyStudentRosterTabulator() {
+    if (studentRosterTabulator) {
+      studentRosterTabulator.destroy();
+      studentRosterTabulator = null;
+    }
+  }
+
+  async function initializeStudentRosterTabulator() {
+    const element = root.querySelector("[data-student-roster-tabulator]");
+    if (!element || activeSectionId !== "students" || !isSiteOperator) {
+      return;
+    }
+
+    const Tabulator = await loadTabulator();
+    if (!element.isConnected || activeSectionId !== "students" || !isSiteOperator) {
+      return;
+    }
+
+    destroyStudentRosterTabulator();
+    studentRosterTabulator = new Tabulator(element, {
+      data: students.map((student) => ({
+        childName: student.childName || "Student",
+        dateOfBirth: student.dateOfBirth || "",
+        className: student.className || "Class",
+        classStatus: Number(student.classCount || 1) > 1 ? "Active classes" : (student.classStatus || "active"),
+        enrollmentSummary: Number(student.classCount || 1) > 1
+          ? `${student.classCount} active enrollments`
+          : `${statusLabel(student.enrollmentStatus || "enrolled")} enrollment`,
+        parentEmail: student.parentEmail || "Parent email unavailable",
+        parentPhone: student.parentPhone || "Phone unavailable",
+        enrollmentDate: student.enrolledAt
+          ? `${Number(student.classCount || 1) > 1 ? "Latest enrollment" : "Enrolled"} ${formatDate(student.enrolledAt)}`
+          : "Enrollment date unavailable",
+      })),
+      columns: [
+        {
+          title: "Student",
+          field: "childName",
+          headerFilter: "input",
+          minWidth: 190,
+          formatter: (cell) => {
+            const data = cell.getRow().getData();
+            return `<strong>${escapeHtml(data.childName)}</strong><br><span>${escapeHtml(data.dateOfBirth ? `DOB ${formatDate(data.dateOfBirth)}` : "Student profile")}</span>`;
+          },
+        },
+        {
+          title: "Class",
+          field: "className",
+          headerFilter: "input",
+          minWidth: 180,
+          formatter: (cell) => {
+            const data = cell.getRow().getData();
+            return `<strong>${escapeHtml(data.className)}</strong><br><span>${escapeHtml(data.enrollmentSummary)}</span>`;
+          },
+        },
+        {
+          title: "Parent contact",
+          field: "parentEmail",
+          headerFilter: "input",
+          minWidth: 230,
+          formatter: (cell) => {
+            const data = cell.getRow().getData();
+            return `<strong>${escapeHtml(data.parentEmail)}</strong><br><span>${escapeHtml(data.parentPhone)}</span>`;
+          },
+        },
+        {
+          title: "Enrollment",
+          field: "classStatus",
+          headerFilter: "input",
+          minWidth: 180,
+          formatter: (cell) => {
+            const data = cell.getRow().getData();
+            return `<strong>${escapeHtml(data.classStatus)}</strong><br><span>${escapeHtml(data.enrollmentDate)}</span>`;
+          },
+        },
+      ],
+      height: "520px",
+      layout: "fitColumns",
+      placeholder: loadingStudents ? "Loading students..." : "No students found for this class group.",
+      movableColumns: true,
+      columnDefaults: {
+        vertAlign: "middle",
+      },
+    });
   }
 
   function scheduleNoticeDismissal() {
@@ -4527,7 +4627,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       ? "Active classes"
       : `History classes (${studentTab === "history-current" ? currentYear : lastYear})`;
     return `
-      <div class="workspace-tabs" role="tablist" aria-label="Student class status">
+      <div class="workspace-tabs student-workspace-tabs" role="tablist" aria-label="Student class status">
         <button class="workspace-tab ${studentTab === "active" ? "is-active" : ""}" data-student-tab="active" role="tab" aria-selected="${studentTab === "active"}" type="button">Active classes</button>
         <button class="workspace-tab ${studentTab === "history-current" ? "is-active" : ""}" data-student-tab="history-current" role="tab" aria-selected="${studentTab === "history-current"}" type="button">History classes (${currentYear})</button>
         <button class="workspace-tab ${studentTab === "history-last" ? "is-active" : ""}" data-student-tab="history-last" role="tab" aria-selected="${studentTab === "history-last"}" type="button">History classes (${lastYear})</button>
@@ -4544,44 +4644,11 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             `).join("")}
           </select>
         </label>
+        <button class="secondary-button compact-button" data-student-refresh type="button" ${loadingStudents ? "disabled" : ""}>
+          Refresh
+        </button>
       </div>
-      <div class="data-list student-roster-list" aria-label="Students">
-        ${
-          students.length
-            ? students.map((student) => {
-                const classCount = Number(student.classCount || 1);
-                const enrollmentSummary = classCount > 1
-                  ? `${classCount} active enrollments`
-                  : `${statusLabel(student.enrollmentStatus || "enrolled")} enrollment`;
-                const classStatus = classCount > 1 ? "Active classes" : (student.classStatus || "active");
-                const enrolledAt = student.enrolledAt ? formatDate(student.enrolledAt) : "";
-                const enrollmentDate = enrolledAt
-                  ? `${classCount > 1 ? "Latest enrollment" : "Enrolled"} ${enrolledAt}`
-                  : "Enrollment date unavailable";
-                return `
-                <div class="data-row student-roster-row">
-                  <div>
-                    <strong>${escapeHtml(student.childName || "Student")}</strong>
-                    <span>${escapeHtml(student.dateOfBirth ? `DOB ${formatDate(student.dateOfBirth)}` : "Student profile")}</span>
-                  </div>
-                  <div>
-                    <strong>${escapeHtml(student.className || "Class")}</strong>
-                    <span>${escapeHtml(enrollmentSummary)}</span>
-                  </div>
-                  <div>
-                    <strong>${escapeHtml(student.parentEmail || "Parent email unavailable")}</strong>
-                    <span>${escapeHtml(student.parentPhone || "Phone unavailable")}</span>
-                  </div>
-                  <div>
-                    <strong>${escapeHtml(classStatus)}</strong>
-                    <span>${escapeHtml(enrollmentDate)}</span>
-                  </div>
-                </div>
-              `;
-              }).join("")
-            : rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")
-        }
-      </div>
+      <div class="student-roster-tabulator" data-student-roster-tabulator aria-label="Students"></div>
     `;
   }
 
@@ -6077,25 +6144,90 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
   }
 
-  async function loadStudents() {
-    if (loadingStudents || !school?.tenantId || !isSiteOperator || !selectedSiteId) {
+  async function loadStudents({ force = false } = {}) {
+    const { currentYear, lastYear } = studentHistoryYears();
+    const year = studentTab === "history-current" ? currentYear : studentTab === "history-last" ? lastYear : "";
+    const group = studentTab === "active" ? "current" : "history";
+    const cacheKey = studentRosterCacheKey();
+    if (!school?.tenantId || !isSiteOperator || !selectedSiteId) {
       return;
     }
-    loadingStudents = true;
-    try {
-      const { currentYear, lastYear } = studentHistoryYears();
-      const year = studentTab === "history-current" ? currentYear : studentTab === "history-last" ? lastYear : "";
-      const group = studentTab === "active" ? "current" : "history";
-      const response = await listStudents(school.tenantId, selectedStudentClassId, selectedSiteId, group, year);
-      students = response.students || [];
-      error = "";
-    } catch (loadError) {
-      students = [];
-      error = loadError instanceof Error ? loadError.message : "Students could not be loaded.";
-    } finally {
+    if (force) {
+      studentRosterCache.delete(cacheKey);
+    }
+    if (studentRosterCache.has(cacheKey)) {
+      students = studentRosterRowsForSelection(studentRosterCache.get(cacheKey));
       loadingStudents = false;
       render();
+      return;
     }
+    if (studentRosterLoadingKeys.has(cacheKey)) {
+      return;
+    }
+    studentRosterLoadingKeys.add(cacheKey);
+    loadingStudents = studentRosterLoadingKeys.has(studentRosterCacheKey());
+    try {
+      const response = await listStudents(school.tenantId, "", selectedSiteId, group, year, true);
+      const result = response.students || [];
+      studentRosterCache.set(cacheKey, result);
+      if (cacheKey === studentRosterCacheKey()) {
+        students = studentRosterRowsForSelection(result);
+      }
+      if (cacheKey === studentRosterCacheKey()) {
+        error = "";
+      }
+    } catch (loadError) {
+      if (cacheKey === studentRosterCacheKey()) {
+        students = [];
+        error = loadError instanceof Error ? loadError.message : "Students could not be loaded.";
+      }
+    } finally {
+      studentRosterLoadingKeys.delete(cacheKey);
+      loadingStudents = studentRosterLoadingKeys.has(studentRosterCacheKey());
+      if (cacheKey === studentRosterCacheKey()) {
+        render();
+      }
+    }
+  }
+
+  function studentRosterCacheKey() {
+    const { currentYear, lastYear } = studentHistoryYears();
+    const year = studentTab === "history-current" ? currentYear : studentTab === "history-last" ? lastYear : "";
+    const group = studentTab === "active" ? "current" : "history";
+    return [school?.tenantId || "", selectedSiteId, group, year].join(":");
+  }
+
+  function studentRosterRowsForSelection(rows) {
+    const selectedRows = selectedStudentClassId
+      ? rows.filter((student) => student.classId === selectedStudentClassId)
+      : rows;
+    if (selectedStudentClassId) {
+      return selectedRows;
+    }
+    const rowsByStudent = new Map();
+    selectedRows.forEach((student) => {
+      const existing = rowsByStudent.get(student.childId) || [];
+      existing.push(student);
+      rowsByStudent.set(student.childId, existing);
+    });
+    return [...rowsByStudent.values()].map((studentRows) => {
+      const first = studentRows[0];
+      const classNames = [...new Set(studentRows.map((student) => student.className).filter(Boolean))];
+      const enrollmentStatuses = [...new Set(studentRows.map((student) => student.enrollmentStatus).filter(Boolean))];
+      const latestEnrollment = studentRows
+        .filter((student) => student.enrolledAt)
+        .sort((left, right) => new Date(right.enrolledAt) - new Date(left.enrolledAt))[0];
+      return {
+        ...first,
+        enrollmentId: studentRows.length === 1 ? first.enrollmentId : null,
+        classId: classNames.length === 1 ? first.classId : null,
+        className: classNames.join(", ") || first.className,
+        classStatus: classNames.length > 1 ? "Active classes" : first.classStatus,
+        enrollmentStatus: enrollmentStatuses.length > 1 ? "multiple" : first.enrollmentStatus,
+        enrolledAt: latestEnrollment?.enrolledAt || first.enrolledAt,
+        classCount: classNames.length,
+      };
+    });
   }
 
   async function loadEnrollments() {

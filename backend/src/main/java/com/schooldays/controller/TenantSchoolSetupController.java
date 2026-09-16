@@ -161,9 +161,10 @@ public class TenantSchoolSetupController extends ApiPlaceholderSupport {
             @RequestParam(value = "classId", required = false) UUID classId,
             @RequestParam(value = "siteId", required = false) UUID siteId,
             @RequestParam(value = "group", defaultValue = "active") String group,
-            @RequestParam(value = "year", required = false) Integer year
+            @RequestParam(value = "year", required = false) Integer year,
+            @RequestParam(value = "detailed", defaultValue = "false") boolean detailed
     ) {
-        return ResponseEntity.ok(studentRosterService.listClassStudents(tenantId, classId, siteId, group, year));
+        return ResponseEntity.ok(studentRosterService.listClassStudents(tenantId, classId, siteId, group, year, detailed));
     }
 
     @PostMapping("/user-invitations")

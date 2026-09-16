@@ -1,6 +1,6 @@
 import { apiGet } from "./client.js";
 
-export function listStudents(tenantId, classId = "", siteId = "", group = "active", year = "") {
+export function listStudents(tenantId, classId = "", siteId = "", group = "active", year = "", detailed = false) {
   const params = new URLSearchParams();
   if (classId) {
     params.set("classId", classId);
@@ -13,6 +13,9 @@ export function listStudents(tenantId, classId = "", siteId = "", group = "activ
   }
   if (year) {
     params.set("year", year);
+  }
+  if (detailed) {
+    params.set("detailed", "true");
   }
   const query = params.toString();
   return apiGet(`/api/tenants/${tenantId}/students${query ? `?${query}` : ""}`);

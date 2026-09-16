@@ -34,6 +34,11 @@ public class StudentRosterService {
 
     public StudentRosterResponse listClassStudents(
             UUID tenantId, UUID classId, UUID siteId, String group, Integer year) {
+        return listClassStudents(tenantId, classId, siteId, group, year, false);
+    }
+
+    public StudentRosterResponse listClassStudents(
+            UUID tenantId, UUID classId, UUID siteId, String group, Integer year, boolean detailed) {
         if (!"active".equalsIgnoreCase(group) && !"current".equalsIgnoreCase(group) && !"history".equalsIgnoreCase(group)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Student group must be active, current, or history");
         }
@@ -53,7 +58,7 @@ public class StudentRosterService {
                 .stream()
                 .map(StudentRosterRowResponse::from)
                 .toList();
-        if (classId == null) {
+        if (classId == null && !detailed) {
             students = summarizeByStudent(students);
         }
         return new StudentRosterResponse(students);

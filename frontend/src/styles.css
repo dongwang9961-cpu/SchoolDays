@@ -1246,6 +1246,17 @@ button:disabled {
   color: #1554a0;
 }
 
+.student-workspace-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.student-workspace-tabs .workspace-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .family-class-section h5 {
   color: #344258;
   font-size: 0.85rem;
@@ -2487,6 +2498,21 @@ button.calendar-day.is-selected {
   height: 100%;
   min-height: 420px;
   min-width: 0;
+}
+
+.student-roster-tabulator {
+  min-height: 300px;
+  min-width: 0;
+}
+
+.student-roster-tabulator .tabulator {
+  min-height: 300px;
+}
+
+.student-roster-tabulator .tabulator-cell strong,
+.student-roster-tabulator .tabulator-cell span {
+  display: inline-block;
+  line-height: 1.35;
 }
 
 .check-in-students-tabulator .tabulator {
