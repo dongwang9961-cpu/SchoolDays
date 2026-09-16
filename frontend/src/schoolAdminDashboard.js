@@ -256,6 +256,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let classes = [];
   let selectedClassId = "";
   let classDetailOpen = false;
+  let classTab = "current";
   let selectedClassPricing = null;
   let loadingClasses = false;
   let loadingClassPricing = false;
@@ -600,6 +601,16 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           loadClasses();
           loadEnrollments();
         }
+      });
+    });
+    root.querySelectorAll("[data-class-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        classTab = button.dataset.classTab === "history" ? "history" : "current";
+        classDetailOpen = false;
+        activeOperation = "";
+        selectedClassPricing = null;
+        classTeachers = [];
+        render();
       });
     });
 
@@ -4112,13 +4123,37 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         </div>
       `;
     }
-    if (section.id === "classes" && classes.length) {
+    if (section.id === "classes" && (isSiteOperator || classes.length)) {
       if (isSiteOperator && classDetailOpen && selectedClass()) {
         return classManagementView(selectedClass());
       }
+      const visibleClasses = isSiteOperator
+        ? classes.filter((classRecord) => classTab === "history"
+          ? isHistoryClass(classRecord)
+          : isCurrentClass(classRecord))
+        : classes;
       return `
+        ${isSiteOperator ? `
+          <div class="workspace-tabs" role="tablist" aria-label="Class status">
+            <button
+              class="secondary-button compact-button ${classTab === "current" ? "is-active" : ""}"
+              data-class-tab="current"
+              type="button"
+            >
+              Current classes
+            </button>
+            <button
+              class="secondary-button compact-button ${classTab === "history" ? "is-active" : ""}"
+              data-class-tab="history"
+              type="button"
+            >
+              History classes
+            </button>
+          </div>
+        ` : ""}
+        ${visibleClasses.length ? `
         <div class="data-list" role="listbox" aria-label="Classes">
-          ${classes
+          ${visibleClasses
             .map(
               (classRecord) => `
                 <div class="data-row class-row ${classRecord.id === selectedClassId ? "is-selected" : ""}">
@@ -4153,6 +4188,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             )
             .join("")}
         </div>
+        ` : `<div class="data-list"><div class="data-row">No ${classTab === "history" ? "history" : "current"} classes found.</div></div>`}
       `;
     }
     if (section.id === "students" && isSiteOperator) {
@@ -5688,6 +5724,17 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     return !isRegistrationOpen(classRecord);
   }
 
+  function isCurrentClass(classRecord) {
+    if (String(classRecord?.status || "").toLowerCase() !== "active") {
+      return false;
+    }
+    return !classRecord.endDate || classRecord.endDate >= localDateValue(new Date());
+  }
+
+  function isHistoryClass(classRecord) {
+    return !isCurrentClass(classRecord);
+  }
+
   function isRegistrationOpen(classRecord) {
     if (String(classRecord?.status || "").toLowerCase() !== "active") {
       return false;
@@ -5734,6 +5781,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     classes = [];
     selectedClassId = "";
     classDetailOpen = false;
+    classTab = "current";
     selectedClassPricing = null;
     classTeachers = [];
     loadingClassTeachers = false;
