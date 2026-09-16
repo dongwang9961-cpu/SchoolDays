@@ -1100,10 +1100,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         childName: student.childName || "Student",
         dateOfBirth: student.dateOfBirth || "",
         className: student.className || "Class",
-        classStatus: Number(student.classCount || 1) > 1 ? "Active classes" : (student.classStatus || "active"),
+        classStatus: Number(student.classCount || 1) > 1 ? "Active classes" : statusLabel(student.classStatus || "active"),
         enrollmentSummary: Number(student.classCount || 1) > 1
           ? `${student.classCount} active enrollments`
-          : `${statusLabel(student.enrollmentStatus || "enrolled")} enrollment`,
+          : statusLabel(student.enrollmentStatus || "enrolled"),
         parentEmail: student.parentEmail || "Parent email unavailable",
         parentPhone: student.parentPhone || "Phone unavailable",
         enrollmentDate: student.enrolledAt
@@ -6198,36 +6198,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function studentRosterRowsForSelection(rows) {
-    const selectedRows = selectedStudentClassId
-      ? rows.filter((student) => student.classId === selectedStudentClassId)
+    return selectedStudentClassId
+      ? rows.filter((student) => String(student.classId || "") === String(selectedStudentClassId))
       : rows;
-    if (selectedStudentClassId) {
-      return selectedRows;
-    }
-    const rowsByStudent = new Map();
-    selectedRows.forEach((student) => {
-      const existing = rowsByStudent.get(student.childId) || [];
-      existing.push(student);
-      rowsByStudent.set(student.childId, existing);
-    });
-    return [...rowsByStudent.values()].map((studentRows) => {
-      const first = studentRows[0];
-      const classNames = [...new Set(studentRows.map((student) => student.className).filter(Boolean))];
-      const enrollmentStatuses = [...new Set(studentRows.map((student) => student.enrollmentStatus).filter(Boolean))];
-      const latestEnrollment = studentRows
-        .filter((student) => student.enrolledAt)
-        .sort((left, right) => new Date(right.enrolledAt) - new Date(left.enrolledAt))[0];
-      return {
-        ...first,
-        enrollmentId: studentRows.length === 1 ? first.enrollmentId : null,
-        classId: classNames.length === 1 ? first.classId : null,
-        className: classNames.join(", ") || first.className,
-        classStatus: classNames.length > 1 ? "Active classes" : first.classStatus,
-        enrollmentStatus: enrollmentStatuses.length > 1 ? "multiple" : first.enrollmentStatus,
-        enrolledAt: latestEnrollment?.enrolledAt || first.enrolledAt,
-        classCount: classNames.length,
-      };
-    });
   }
 
   async function loadEnrollments() {
