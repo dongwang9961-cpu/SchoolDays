@@ -1442,6 +1442,16 @@ button:disabled {
   padding: 8px 10px;
 }
 
+.student-class-status {
+  color: #5f6f86;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.student-class-status strong {
+  color: #22314a;
+}
+
 .student-roster-row {
   display: grid;
   gap: 12px;

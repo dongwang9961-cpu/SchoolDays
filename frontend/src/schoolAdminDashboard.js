@@ -1100,7 +1100,6 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         childName: student.childName || "Student",
         dateOfBirth: student.dateOfBirth || "",
         className: student.className || "Class",
-        classStatus: Number(student.classCount || 1) > 1 ? "Active classes" : statusLabel(student.classStatus || "active"),
         enrollmentSummary: Number(student.classCount || 1) > 1
           ? `${student.classCount} active enrollments`
           : statusLabel(student.enrollmentStatus || "enrolled"),
@@ -1116,40 +1115,49 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           field: "childName",
           headerFilter: "input",
           minWidth: 190,
-          formatter: (cell) => {
-            const data = cell.getRow().getData();
-            return `<strong>${escapeHtml(data.childName)}</strong><br><span>${escapeHtml(data.dateOfBirth ? `DOB ${formatDate(data.dateOfBirth)}` : "Student profile")}</span>`;
-          },
+          formatter: (cell) => `<strong>${escapeHtml(cell.getValue())}</strong>`,
+        },
+        {
+          title: "DOB",
+          field: "dateOfBirth",
+          headerFilter: "input",
+          minWidth: 125,
+          formatter: (cell) => cell.getValue() ? formatDate(cell.getValue()) : "-",
         },
         {
           title: "Class",
           field: "className",
           headerFilter: "input",
           minWidth: 180,
-          formatter: (cell) => {
-            const data = cell.getRow().getData();
-            return `<strong>${escapeHtml(data.className)}</strong><br><span>${escapeHtml(data.enrollmentSummary)}</span>`;
-          },
+          formatter: (cell) => escapeHtml(cell.getValue()),
         },
         {
-          title: "Parent contact",
+          title: "Enrollment status",
+          field: "enrollmentSummary",
+          headerFilter: "input",
+          minWidth: 150,
+          formatter: (cell) => escapeHtml(cell.getValue()),
+        },
+        {
+          title: "Parent email",
           field: "parentEmail",
           headerFilter: "input",
           minWidth: 230,
-          formatter: (cell) => {
-            const data = cell.getRow().getData();
-            return `<strong>${escapeHtml(data.parentEmail)}</strong><br><span>${escapeHtml(data.parentPhone)}</span>`;
-          },
+          formatter: (cell) => escapeHtml(cell.getValue()),
         },
         {
-          title: "Enrollment",
-          field: "classStatus",
+          title: "Parent phone",
+          field: "parentPhone",
+          headerFilter: "input",
+          minWidth: 150,
+          formatter: (cell) => escapeHtml(cell.getValue()),
+        },
+        {
+          title: "Enrolled date",
+          field: "enrollmentDate",
           headerFilter: "input",
           minWidth: 180,
-          formatter: (cell) => {
-            const data = cell.getRow().getData();
-            return `<strong>${escapeHtml(data.classStatus)}</strong><br><span>${escapeHtml(data.enrollmentDate)}</span>`;
-          },
+          formatter: (cell) => escapeHtml(cell.getValue()),
         },
       ],
       height: "520px",
@@ -4623,14 +4631,18 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     });
     const selectedClassStillVisible = visibleClasses.some((classRecord) => classRecord.id === selectedStudentClassId);
     const selectedClassId = selectedClassStillVisible ? selectedStudentClassId : "";
+    const selectedClassRecord = visibleClasses.find((classRecord) => classRecord.id === selectedClassId);
+    const classStatusText = selectedClassRecord
+      ? statusLabel(selectedClassRecord.status || "active")
+      : studentTab === "active" ? "Active" : "History";
     const tabLabel = studentTab === "active"
       ? "Active classes"
       : `History classes (${studentTab === "history-current" ? currentYear : lastYear})`;
     return `
       <div class="workspace-tabs student-workspace-tabs" role="tablist" aria-label="Student class status">
-        <button class="workspace-tab ${studentTab === "active" ? "is-active" : ""}" data-student-tab="active" role="tab" aria-selected="${studentTab === "active"}" type="button">Active classes</button>
-        <button class="workspace-tab ${studentTab === "history-current" ? "is-active" : ""}" data-student-tab="history-current" role="tab" aria-selected="${studentTab === "history-current"}" type="button">History classes (${currentYear})</button>
-        <button class="workspace-tab ${studentTab === "history-last" ? "is-active" : ""}" data-student-tab="history-last" role="tab" aria-selected="${studentTab === "history-last"}" type="button">History classes (${lastYear})</button>
+        <button class="secondary-button compact-button workspace-tab ${studentTab === "active" ? "is-active" : ""}" data-student-tab="active" role="tab" aria-selected="${studentTab === "active"}" type="button">Active classes</button>
+        <button class="secondary-button compact-button workspace-tab ${studentTab === "history-current" ? "is-active" : ""}" data-student-tab="history-current" role="tab" aria-selected="${studentTab === "history-current"}" type="button">History classes (${currentYear})</button>
+        <button class="secondary-button compact-button workspace-tab ${studentTab === "history-last" ? "is-active" : ""}" data-student-tab="history-last" role="tab" aria-selected="${studentTab === "history-last"}" type="button">History classes (${lastYear})</button>
       </div>
       <div class="list-filter-bar">
         <label>
@@ -4647,6 +4659,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         <button class="secondary-button compact-button" data-student-refresh type="button" ${loadingStudents ? "disabled" : ""}>
           Refresh
         </button>
+        <span class="student-class-status">Class status: <strong>${escapeHtml(classStatusText)}</strong></span>
       </div>
       <div class="student-roster-tabulator" data-student-roster-tabulator aria-label="Students"></div>
     `;
