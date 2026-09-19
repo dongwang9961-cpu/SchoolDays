@@ -16,6 +16,7 @@ public record EnrollmentResponse(
         String className,
         LocalDate classStartDate,
         LocalDate classEndDate,
+        String classStatus,
         String status,
         List<UUID> selectedOptionalFeeItemIds,
         OffsetDateTime createdAt,
@@ -27,7 +28,8 @@ public record EnrollmentResponse(
             List<UUID> selectedOptionalFeeItemIds,
             String className,
             LocalDate classStartDate,
-            LocalDate classEndDate
+            LocalDate classEndDate,
+            String classStatus
     ) {
         return new EnrollmentResponse(
                 record.getId(),
@@ -38,6 +40,7 @@ public record EnrollmentResponse(
                 className,
                 classStartDate,
                 classEndDate,
+                classStatus,
                 record.getEnrollmentStatus(),
                 selectedOptionalFeeItemIds == null ? List.of() : selectedOptionalFeeItemIds,
                 record.getCreatedAt(),
@@ -46,6 +49,6 @@ public record EnrollmentResponse(
     }
 
     public static EnrollmentResponse from(EnrollmentsRecord record, List<UUID> selectedOptionalFeeItemIds) {
-        return from(record, selectedOptionalFeeItemIds, null, null, null);
+        return from(record, selectedOptionalFeeItemIds, null, null, null, null);
     }
 }

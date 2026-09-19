@@ -277,7 +277,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let loadingChildren = false;
   let enrollments = [];
   let selectedEnrollmentId = "";
+  let enrollmentPageTab = "current";
   let parentEnrollmentTabs = new Map();
+  const parentEnrollmentCache = new Map();
   let loadingEnrollments = false;
   let pendingEnrollmentRequests = [];
   let loadingPendingEnrollmentRequests = false;
@@ -999,6 +1001,16 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       attendanceGrid = null;
       render();
       loadAttendanceGrid();
+    });
+    root.querySelector("[data-enrollment-refresh]")?.addEventListener("click", () => {
+      void refreshParentEnrollments();
+    });
+    root.querySelectorAll("[data-enrollment-page-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        enrollmentPageTab = button.dataset.enrollmentPageTab === "history" ? "history" : "current";
+        selectedEnrollmentId = "";
+        render();
+      });
     });
     root.querySelectorAll("[data-attendance-view]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -4517,17 +4529,36 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
   function enrolledClassSummary(enrollment) {
     const classRecord = classes.find((item) => item.id === enrollment.classId);
+    const enrollmentState = parentEnrollmentState(enrollment, classRecord);
     const className = classRecord?.name || enrollment.className || "Class";
     const dateRange = classRecord
       ? enrollmentDateRange(classRecord)
       : [enrollment.classStartDate, enrollment.classEndDate].filter(Boolean).map(formatDate).join(" - ") || "Date range unavailable";
     return `
-      <div class="family-class-row">
+      <div class="family-class-row is-${escapeHtml(enrollmentState.className)}">
         <strong>${escapeHtml(className)}</strong>
         <span>${escapeHtml(dateRange + (classRecord ? ` - ${classScheduleText(classRecord)}` : ""))}</span>
-        <small>${escapeHtml(statusLabel(enrollment.status || "enrolled"))}</small>
+        <small>${escapeHtml(enrollmentState.label)}</small>
       </div>
     `;
+  }
+
+  function parentEnrollmentState(enrollment, classRecord) {
+    const enrollmentStatus = String(enrollment.status || "").toLowerCase();
+    if (enrollmentStatus === "pending") {
+      return { className: "pending", label: "Pending" };
+    }
+    if (["cancelled", "rejected"].includes(enrollmentStatus)) {
+      return { className: "closed", label: statusLabel(enrollmentStatus) };
+    }
+
+    const classStatus = String(enrollment.classStatus || classRecord?.status || "inactive").toLowerCase();
+    const classEndDate = classRecord?.endDate || enrollment.classEndDate;
+    const classEnded = classEndDate && classEndDate < localDateValue(new Date());
+    if (classStatus !== "active" || classEnded) {
+      return { className: "inactive", label: "Enrolled - class inactive" };
+    }
+    return { className: "active", label: "Enrolled and active" };
   }
 
   function availableClassSummary(classRecord, childId) {
@@ -4808,16 +4839,45 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function enrollmentList(rows) {
+    const visibleEnrollments = parentEnrollmentPageRows();
     return `
+      <div class="enrollment-list-toolbar">
+        <div class="enrollment-page-tabs" role="tablist" aria-label="Enrollment records">
+          <button
+            class="secondary-button compact-button ${enrollmentPageTab === "current" ? "is-active" : ""}"
+            data-enrollment-page-tab="current"
+            type="button"
+          >
+            Current & pending (${currentParentEnrollments().length + pendingParentEnrollments().length})
+          </button>
+          <button
+            class="secondary-button compact-button ${enrollmentPageTab === "history" ? "is-active" : ""}"
+            data-enrollment-page-tab="history"
+            type="button"
+          >
+            History (${parentEnrollmentHistory().length})
+          </button>
+        </div>
+        <span class="enrollment-cache-note">Enrollment records are cached until refreshed.</span>
+        <button
+          class="secondary-button compact-button"
+          data-enrollment-refresh
+          type="button"
+          ${loadingEnrollments ? "disabled" : ""}
+        >
+          ${loadingEnrollments ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
       ${selectedEnrollmentCalendar()}
       <div class="data-list enrollment-list" aria-label="Enrollments">
         ${
-          enrollments.length
-            ? enrollments.map((enrollment) => {
+          visibleEnrollments.length
+            ? visibleEnrollments.map((enrollment) => {
                 const classRecord = classes.find((item) => item.id === enrollment.classId);
+                const enrollmentState = parentEnrollmentState(enrollment, classRecord);
                 const selectedCount = enrollment.selectedOptionalFeeItemIds?.length || 0;
                 return `
-                  <button class="data-row enrollment-row enrollment-detail-row ${selectedEnrollmentId === enrollment.id ? "is-selected" : ""}" data-enrollment-detail-id="${escapeHtml(enrollment.id)}" type="button">
+                  <button class="data-row enrollment-row enrollment-detail-row is-${escapeHtml(enrollmentState.className)} ${selectedEnrollmentId === enrollment.id ? "is-selected" : ""}" data-enrollment-detail-id="${escapeHtml(enrollment.id)}" type="button">
                     <div>
                       <strong>${escapeHtml(classRecord?.name || "Class")}</strong>
                       <span>${escapeHtml(childName(enrollment.childId))}</span>
@@ -4827,7 +4887,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
                       <span>${escapeHtml(classRecord ? classScheduleText(classRecord) : "Schedule unavailable")}</span>
                     </div>
                     <div>
-                      <strong>${escapeHtml(statusLabel(enrollment.status || "pending"))}</strong>
+                      <strong>${escapeHtml(enrollmentState.label)}</strong>
                       <span>${escapeHtml(`Registered ${formatDate(enrollment.createdAt) || "date unavailable"}`)}</span>
                     </div>
                     <div>
@@ -4841,6 +4901,16 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         }
       </div>
     `;
+  }
+
+  function parentEnrollmentPageRows() {
+    const visibleIds = enrollmentPageTab === "history"
+      ? new Set(parentEnrollmentHistory().map((enrollment) => enrollment.id))
+      : new Set([
+          ...currentParentEnrollments().map((enrollment) => enrollment.id),
+          ...pendingParentEnrollments().map((enrollment) => enrollment.id),
+        ]);
+    return enrollments.filter((enrollment) => visibleIds.has(enrollment.id));
   }
 
   function pendingEnrollmentRequestList() {
@@ -6216,20 +6286,44 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       : rows;
   }
 
-  async function loadEnrollments() {
+  async function loadEnrollments({ force = false } = {}) {
     if (loadingEnrollments || !school?.tenantId || role !== "PARENT") {
+      return;
+    }
+    const cacheKey = school.tenantId;
+    const cached = parentEnrollmentCache.get(cacheKey);
+    if (!force && cached) {
+      enrollments = cached.enrollments;
+      error = "";
+      render();
       return;
     }
     loadingEnrollments = true;
     try {
       const response = await listParentEnrollments(school.tenantId);
       enrollments = response.enrollments || [];
+      parentEnrollmentCache.set(cacheKey, {
+        enrollments,
+        loadedAt: Date.now(),
+      });
+      error = "";
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : "Enrollments could not be loaded.";
     } finally {
       loadingEnrollments = false;
       render();
     }
+  }
+
+  function invalidateParentEnrollmentCache() {
+    if (school?.tenantId) {
+      parentEnrollmentCache.delete(school.tenantId);
+    }
+  }
+
+  async function refreshParentEnrollments() {
+    invalidateParentEnrollmentCache();
+    await loadEnrollments({ force: true });
   }
 
   async function loadPendingEnrollmentRequests() {
@@ -6376,7 +6470,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       error = "";
       enrollmentModalOpen = false;
       enrollmentPricing = null;
-      await loadEnrollments();
+      invalidateParentEnrollmentCache();
+      await loadEnrollments({ force: true });
       await loadAttendance();
       if (redirectToPayments) {
         activeSectionId = "payments";
@@ -6455,7 +6550,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         : `${childName(childId)} enrolled in ${classRecord.name}.`;
       error = "";
       showTransientToast(notice);
-      await loadEnrollments();
+      invalidateParentEnrollmentCache();
+      await loadEnrollments({ force: true });
       await loadAttendance();
       render();
     } catch (enrollmentError) {

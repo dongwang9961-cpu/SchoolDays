@@ -51,7 +51,8 @@ public class EnrollmentService {
                             enrollmentDao.selectedOptionalFeeItemIds(enrollment.getId()),
                             record.get(CLASSES.NAME),
                             record.get(CLASSES.START_DATE),
-                            record.get(CLASSES.END_DATE)
+                            record.get(CLASSES.END_DATE),
+                            record.get(CLASSES.STATUS)
                     );
                 })
                 .toList();

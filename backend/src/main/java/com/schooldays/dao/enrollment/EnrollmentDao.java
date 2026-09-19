@@ -123,7 +123,7 @@ public class EnrollmentDao {
 
     public List<Record> listParentEnrollments(UUID tenantId, UUID parentUserId) {
         return dsl.select(ENROLLMENTS.fields())
-                .select(CLASSES.NAME, CLASSES.START_DATE, CLASSES.END_DATE)
+                .select(CLASSES.NAME, CLASSES.START_DATE, CLASSES.END_DATE, CLASSES.STATUS)
                 .from(ENROLLMENTS)
                 .join(CHILDREN).on(CHILDREN.ID.eq(ENROLLMENTS.CHILD_ID))
                 .join(CLASSES).on(CLASSES.ID.eq(ENROLLMENTS.CLASS_ID))
