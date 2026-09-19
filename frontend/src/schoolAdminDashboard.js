@@ -4,7 +4,7 @@ import { deleteUser, inviteUsers, listStudentsForCheckIn, sendPasswordResetLinks
 import { checkInAttendance, checkInStudent, getClassAttendanceGrid, listClassCheckIns, listClassAttendanceCounts, listParentAttendance } from "./api/attendance.js";
 import { createChild, listChildren, updateChild } from "./api/children.js";
 import { assignClassTeacher, closeClassEnrollment, createClass, listAvailableClasses, listClasses, listClassTeachers, listTeacherClasses, stopClass, updateClass } from "./api/classes.js";
-import { approveEnrollmentRequest, createEnrollment, listParentEnrollments, listPendingEnrollmentRequests, rejectEnrollmentRequest } from "./api/enrollments.js";
+import { approveEnrollmentRequest, createEnrollment, listParentEnrollments, listParentMessages, listPendingEnrollmentRequests, markParentMessageRead, rejectEnrollmentRequest } from "./api/enrollments.js";
 import { getClassPricing, getTenantClassPricing, saveClassPricing } from "./api/pricing.js";
 import { createProgram, listPrograms, updateProgram } from "./api/programs.js";
 import { createSite, listSites, updateSite } from "./api/sites.js";
@@ -164,6 +164,14 @@ const parentSections = [
     rows: ["No family dashboard data loaded yet."],
   },
   {
+    id: "attendance",
+    label: "Check In for Class",
+    title: "Check In for Class",
+    summary: "Check in your children for their scheduled classes and review attendance history.",
+    actions: [],
+    rows: ["No attendance records loaded yet."],
+  },
+  {
     id: "children",
     label: "Children",
     title: "Children",
@@ -192,18 +200,8 @@ const parentSections = [
     label: "Payments",
     title: "Payments",
     summary: "Pay required fees, upload receipts, and review payment history.",
-    disabled: true,
     actions: [],
     rows: ["No payment records loaded yet."],
-  },
-  {
-    id: "attendance",
-    label: "Attendance",
-    title: "Attendance",
-    summary: "Check in children and review attendance history.",
-    disabled: true,
-    actions: [],
-    rows: ["No attendance records loaded yet."],
   },
 ];
 
@@ -259,6 +257,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let classTab = "current";
   let selectedClassPricing = null;
   let loadingClasses = false;
+  let refreshingParentClasses = false;
   let loadingClassPricing = false;
   let classTeachers = [];
   let loadingClassTeachers = false;
@@ -277,6 +276,9 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let selectedChildId = "";
   let loadingChildren = false;
   let enrollments = [];
+  let parentMessages = [];
+  let loadingParentMessages = false;
+  let parentMessagesPopupOpen = false;
   let selectedEnrollmentId = "";
   let enrollmentPageTab = "current";
   let parentEnrollmentTabs = new Map();
@@ -294,6 +296,8 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let enrollmentModalOpen = false;
   let enrollmentPricing = null;
   let loadingEnrollmentPricing = false;
+  let enrollmentRejectId = "";
+  let enrollmentRejectSubmitting = false;
   let profileOpen = false;
   let profile = null;
   let loadingProfile = false;
@@ -392,7 +396,8 @@ let checkInQuickTabulator = null;
 let checkInScannerStatus = "Starting camera...";
 let checkInPeriodicRefreshTimer = null;
 const classListCache = new Map();
-const CLASS_LIST_CACHE_TTL_MS = 5000;
+const CLASS_LIST_CACHE_TTL_MS = 10 * 60 * 1000;
+const SUGGESTED_CLASS_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
 const EXTERNAL_STUDENT_CACHE_VERSION = 1;
 const EXTERNAL_STUDENT_CACHE_PREFIX = "schooldays.externalStudents";
 const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
@@ -406,6 +411,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     loadClasses();
     loadEnrollments();
     loadAttendance();
+    loadParentMessages();
   }
 
   window.addEventListener("message", (event) => {
@@ -530,21 +536,16 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             </div>
             <div class="header-actions">
               ${parentCheckInTaskButton(checkInTasks)}
-              ${profileMenu(user, { profileDisabled: role === "PARENT" && hasExternalAuth(user) })}
+              ${role === "PARENT" ? parentMessagesHeaderButton() : ""}
+              ${profileMenu(user)}
             </div>
           </header>
 
           ${toolbarFor(activeSection)}
 
           <section class="workspace-panel">
-            <div class="workspace-heading workspace-heading-row">
-              <div>
-                <h3>${escapeHtml(activeSection.title)} workspace</h3>
-                <p>${escapeHtml(workspaceHint(activeSection, role))}</p>
-                ${activeSection.id === "sites" && siteQuota ? `<p class="context-note">${escapeHtml(siteQuotaText(siteQuota))}</p>` : ""}
-              </div>
-              ${panelHeaderAction(activeSection, role)}
-            </div>
+            ${panelHeaderAction(activeSection, role) ? `<div class="workspace-panel-toolbar">${panelHeaderAction(activeSection, role)}</div>` : ""}
+            ${activeSection.id === "sites" && siteQuota ? `<p class="context-note">${escapeHtml(siteQuotaText(siteQuota))}</p>` : ""}
 
             ${error ? `<p class="message error" role="alert">${escapeHtml(error)}</p>` : ""}
             ${activeOperationPanel}
@@ -555,6 +556,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           ${checkInReminderVisible ? checkInReminderModal(checkInTasks) : ""}
           ${profileOpen ? profilePanel(profile, user, loadingProfile) : ""}
           ${enrollmentModalOpen ? enrollmentModal(selectedClass(), children, enrollmentPricing, enrollments, loadingEnrollmentPricing) : ""}
+          ${enrollmentRejectId ? enrollmentRejectModal(enrollmentRejectId) : ""}
+          ${parentMessagesPopupOpen ? parentMessagesPopup() : ""}
           ${noticeToast(notice)}
         </section>
       </main>
@@ -563,6 +566,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     root.querySelectorAll("[data-section-id]").forEach((button) => {
       button.addEventListener("click", () => {
         activeSectionId = button.dataset.sectionId;
+        selectedEnrollmentId = "";
         if (activeSectionId === "classes") {
           classDetailOpen = false;
         }
@@ -580,6 +584,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           loadChildren();
           loadClasses();
           loadEnrollments();
+          loadParentMessages();
         }
         if (activeSectionId === "children") {
           loadChildren();
@@ -1011,6 +1016,11 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     root.querySelector("[data-children-refresh]")?.addEventListener("click", () => {
       void refreshChildren();
     });
+    root.querySelectorAll("[data-parent-classes-refresh]").forEach((button) => {
+      button.addEventListener("click", () => {
+        void refreshParentClasses();
+      });
+    });
     root.querySelectorAll("[data-enrollment-page-tab]").forEach((button) => {
       button.addEventListener("click", () => {
         enrollmentPageTab = button.dataset.enrollmentPageTab === "history" ? "history" : "current";
@@ -1030,9 +1040,10 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         openEnrollmentModal();
       });
     });
-    root.querySelectorAll("[data-family-register-child-id]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        await handleFamilyRegisterClick(button);
+    root.querySelectorAll("[data-family-suggested-class-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedClassId = button.dataset.familySuggestedClassId;
+        void openEnrollmentModal();
       });
     });
     root.querySelectorAll("[data-child-id]").forEach((button) => {
@@ -1058,10 +1069,48 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         render();
       });
     });
-    root.querySelectorAll("[data-enrollment-request-action]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        await handleEnrollmentRequestAction(button.dataset.enrollmentRequestAction, button.dataset.enrollmentRequestId);
+    root.querySelector("[data-parent-messages-header]")?.addEventListener("click", () => {
+      parentMessagesPopupOpen = true;
+      notice = "";
+      error = "";
+      render();
+      void loadParentMessages();
+    });
+    root.querySelector("[data-parent-messages-close]")?.addEventListener("click", () => {
+      parentMessagesPopupOpen = false;
+      render();
+    });
+    root.querySelector("[data-parent-messages-modal]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        parentMessagesPopupOpen = false;
+        render();
+      }
+    });
+    root.querySelectorAll("[data-parent-message-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        void markParentMessageAsRead(button.dataset.parentMessageId);
       });
+    });
+    root.querySelectorAll("[data-enrollment-request-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (button.dataset.enrollmentRequestAction === "reject") {
+          enrollmentRejectId = button.dataset.enrollmentRequestId || "";
+          notice = "";
+          error = "";
+          render();
+          return;
+        }
+        void handleEnrollmentRequestAction(button.dataset.enrollmentRequestAction, button.dataset.enrollmentRequestId);
+      });
+    });
+    root.querySelector("[data-enrollment-reject-cancel]")?.addEventListener("click", () => {
+      enrollmentRejectId = "";
+      enrollmentRejectSubmitting = false;
+      error = "";
+      render();
+    });
+    root.querySelector("[data-enrollment-reject-form]")?.addEventListener("submit", (event) => {
+      void handleEnrollmentRejectSubmit(event);
     });
     root.querySelectorAll("[data-child-edit-id]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -1075,6 +1124,15 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     root.querySelectorAll("[data-enrollment-detail-id]").forEach((button) => {
       button.addEventListener("click", () => {
         selectedEnrollmentId = button.dataset.enrollmentDetailId;
+        notice = "";
+        error = "";
+        render();
+        loadAttendance();
+      });
+    });
+    root.querySelectorAll("[data-enrollment-overall-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedEnrollmentId = button.dataset.enrollmentOverallId;
         notice = "";
         error = "";
         render();
@@ -3966,6 +4024,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         notice = "Class saved to the database.";
         error = "";
         activeOperation = "";
+        invalidateClassListCache();
         resetClasses();
         render();
         await loadClasses();
@@ -4289,6 +4348,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             </button>
           </div>
         ` : ""}
+        ${role === "PARENT" ? parentClassesToolbar() : ""}
         ${visibleClasses.length ? `
         <div class="data-list" role="listbox" aria-label="Classes">
           ${visibleClasses
@@ -4302,6 +4362,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
                   >
                     <span>${escapeHtml(classRecord.name)}</span>
                     <span>${escapeHtml(`${programName(classRecord.programId)} - ${classScheduleText(classRecord)}`)}</span>
+                    ${role === "PARENT" ? `<span>${escapeHtml(classLocationText(classRecord))}</span>` : ""}
                     <span>${escapeHtml(classRecord.status)}</span>
                   </button>
                   ${role === "PARENT" ? `
@@ -4348,7 +4409,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       return pendingEnrollmentRequestList();
     }
     if (section.id === "attendance" && role === "PARENT") {
-      return attendanceList();
+      return selectedEnrollment() ? selectedEnrollmentCalendar() : attendanceList();
     }
     if (section.id === "attendance" && isSiteOperator) {
       return adminAttendanceGrid(rows);
@@ -4380,6 +4441,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
     const currentEnrollments = currentParentEnrollments();
     const openClasses = classes.filter((classRecord) => !isEnrollmentClosed(classRecord));
+    const suggestedClasses = recentSuggestedClasses();
     return `
       <section class="family-overview" aria-label="Family overview">
         <div class="family-overview-metrics" aria-label="Family summary">
@@ -4388,6 +4450,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           ${familyMetric("Open classes", openClasses.length)}
           ${familyMetric("Pending payments", pendingPaymentEnrollments().length)}
         </div>
+        ${suggestedClassesPanel(suggestedClasses)}
         <div class="family-child-grid">
           ${children.map((child) => familyChildCard(child)).join("")}
         </div>
@@ -4404,11 +4467,103 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     `;
   }
 
+  function parentMessagesHeaderButton() {
+    const unreadCount = parentMessages.filter((message) => !message.readAt).length;
+    return `
+      <button class="parent-messages-header-button ${unreadCount ? "has-unread" : ""}" data-parent-messages-header aria-label="Messages${unreadCount ? `, ${unreadCount} unread` : ""}" type="button" title="Open messages">
+        <span class="parent-messages-icon" aria-hidden="true">✉</span>
+        <strong>${escapeHtml(String(unreadCount))}</strong>
+      </button>
+    `;
+  }
+
+  function parentMessagesPopup() {
+    return `
+      <div class="modal-backdrop" data-parent-messages-modal>
+        <section class="family-messages-panel parent-messages-popup" role="dialog" aria-modal="true" aria-labelledby="parent-messages-title">
+          <div class="workspace-heading workspace-heading-row">
+            <div>
+              <h3 id="parent-messages-title">Messages</h3>
+              <p>Messages are ordered from most recent to oldest.</p>
+            </div>
+            <button class="secondary-button compact-button" data-parent-messages-close type="button">Close</button>
+          </div>
+        ${loadingParentMessages
+          ? `<div class="data-row">Loading messages...</div>`
+          : parentMessages.length
+            ? `<div class="family-message-list">${parentMessages.map(parentMessageRow).join("")}</div>`
+            : `<p class="context-note">No messages yet.</p>`}
+        </section>
+      </div>
+    `;
+  }
+
+  function parentMessageRow(message) {
+    const unread = !message.readAt;
+    const context = [message.childName, message.className].filter(Boolean).join(" - ");
+    return `
+      <button class="family-message-row ${unread ? "is-unread" : ""}" data-parent-message-id="${escapeHtml(message.id)}" type="button">
+        <span class="family-message-row-header">
+          <strong>${escapeHtml(message.messageType === "enrollment_rejected" ? "Enrollment request declined" : "Message")}</strong>
+          <time datetime="${escapeHtml(message.createdAt || "")}">${escapeHtml(message.createdAt ? new Date(message.createdAt).toLocaleString() : "Date unavailable")}</time>
+        </span>
+        ${context ? `<span class="family-message-context">${escapeHtml(context)}</span>` : ""}
+        <span>${escapeHtml(message.message || "")}</span>
+      </button>
+    `;
+  }
+
+  function suggestedClassesPanel(suggestedClasses) {
+    return `
+      <section class="family-suggested-classes" aria-label="Suggested classes">
+        <div class="family-section-heading">
+          <div>
+            <h4>Suggested classes</h4>
+            <p>Recently added classes that none of your children are enrolled in.</p>
+          </div>
+        </div>
+        ${suggestedClasses.length
+          ? `<div class="family-open-class-list">${suggestedClasses.map(suggestedClassSummary).join("")}</div>`
+          : `<p class="context-note">No recently added classes are available right now.</p>`}
+      </section>
+    `;
+  }
+
+  function suggestedClassSummary(classRecord) {
+    return `
+      <button
+        class="family-open-class-row family-suggested-class-row"
+        data-family-suggested-class-id="${escapeHtml(classRecord.id)}"
+        type="button"
+      >
+        <div>
+          <strong>${escapeHtml(classRecord.name || "Class")}</strong>
+          <span>${escapeHtml(`${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}`)}</span>
+          <small>${escapeHtml(classLocationText(classRecord))}</small>
+          <small>${escapeHtml(classRecord.registrationClosesAt ? `Registration closes ${new Date(classRecord.registrationClosesAt).toLocaleString()}` : "Registration open")}</small>
+        </div>
+        <span class="family-suggested-class-cta">Select class to enroll</span>
+      </button>
+    `;
+  }
+
+  function recentSuggestedClasses() {
+    const enrolledClassIds = new Set(activeParentEnrollments().map((enrollment) => enrollment.classId));
+    const recentCutoff = Date.now() - SUGGESTED_CLASS_WINDOW_MS;
+    return classes
+      .filter((classRecord) => !enrolledClassIds.has(classRecord.id))
+      .filter((classRecord) => !isEnrollmentClosed(classRecord))
+      .filter((classRecord) => {
+        const createdAt = Date.parse(classRecord.createdAt || "");
+        return Number.isFinite(createdAt) && createdAt >= recentCutoff;
+      })
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+  }
+
   function familyChildCard(child) {
     const enrollmentTab = parentEnrollmentTabs.get(child.id) || "current";
     const currentEnrollments = currentAndPendingParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
     const historyEnrollments = parentEnrollmentHistory().filter((enrollment) => enrollment.childId === child.id);
-    const availableClasses = availableClassesForChild(child.id);
     const details = [
       child.dateOfBirth ? `DOB ${formatDate(child.dateOfBirth)}` : "",
       child.grade ? `Grade ${child.grade}` : "",
@@ -4441,10 +4596,11 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             Enrollment history
           </button>
         </div>
-        ${enrollmentTab === "history"
-          ? familyClassList("Enrollment history", historyEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No enrollment history.")
-          : familyClassList("Current & pending enrollments", currentEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current or pending enrollments.")}
-        ${familyClassList("Open classes", availableClasses.map((classRecord) => availableClassSummary(classRecord, child.id)), "No additional open classes right now.")}
+        <div class="family-enrollment-tab-panel" role="tabpanel">
+          ${enrollmentTab === "history"
+            ? familyClassList("Enrollment history", historyEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No enrollment history.")
+            : familyClassList("Current & pending enrollments", currentEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current or pending enrollments.")}
+        </div>
       </article>
     `;
   }
@@ -4554,7 +4710,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       <div class="family-class-row is-${escapeHtml(enrollmentState.className)}">
         <strong>${escapeHtml(className)}</strong>
         <span>${escapeHtml(dateRange + (classRecord ? ` - ${classScheduleText(classRecord)}` : ""))}</span>
+        <small>${escapeHtml(classLocationText(classRecord, enrollment))}</small>
         <small>${escapeHtml(enrollmentState.label)}</small>
+        ${enrollment.messages?.length ? `<small>Message: ${escapeHtml(enrollment.messages[enrollment.messages.length - 1].message)}</small>` : ""}
       </div>
     `;
   }
@@ -4575,37 +4733,6 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       return { className: "inactive", label: "Enrolled - class inactive" };
     }
     return { className: "active", label: "Enrolled and active" };
-  }
-
-  function availableClassSummary(classRecord, childId) {
-    return `
-      <div class="family-open-class-row">
-        <div>
-          <strong>${escapeHtml(classRecord.name || "Class")}</strong>
-          <span>${escapeHtml(`${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}`)}</span>
-          <small>${escapeHtml(classRecord.registrationClosesAt ? `Registration closes ${new Date(classRecord.registrationClosesAt).toLocaleString()}` : "Registration open")}</small>
-        </div>
-        <button
-          class="secondary-button compact-button family-register-button"
-          data-family-register-child-id="${escapeHtml(childId)}"
-          data-family-register-class-id="${escapeHtml(classRecord.id)}"
-          type="button"
-        >
-          Register
-        </button>
-      </div>
-    `;
-  }
-
-  function availableClassesForChild(childId) {
-    const registeredClassIds = new Set(
-      activeParentEnrollments()
-        .filter((enrollment) => enrollment.childId === childId)
-        .map((enrollment) => enrollment.classId)
-    );
-    return classes
-      .filter((classRecord) => !registeredClassIds.has(classRecord.id))
-      .filter((classRecord) => !isEnrollmentClosed(classRecord));
   }
 
   function activeParentEnrollments() {
@@ -4688,7 +4815,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     const selectedClassId = selectedClassStillVisible ? selectedStudentClassId : "";
     const selectedClassRecord = visibleClasses.find((classRecord) => classRecord.id === selectedClassId);
     const classStatusText = selectedClassRecord
-      ? statusLabel(selectedClassRecord.status || "active")
+      ? statusLabel(effectiveClassStatus(selectedClassRecord))
       : studentTab === "active" ? "Active" : "History";
     const tabLabel = studentTab === "active"
       ? "Active classes"
@@ -4863,6 +4990,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function enrollmentList(rows) {
+    if (selectedEnrollment()) {
+      return selectedEnrollmentCalendar();
+    }
     const visibleEnrollments = parentEnrollmentPageRows();
     return `
       <div class="enrollment-list-toolbar">
@@ -4892,7 +5022,6 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           ${loadingEnrollments || refreshingParentData ? "Refreshing..." : "Refresh"}
         </button>
       </div>
-      ${selectedEnrollmentCalendar()}
       <div class="data-list enrollment-list" aria-label="Enrollments">
         ${
           visibleEnrollments.length
@@ -4912,6 +5041,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
                     </div>
                     <div>
                       <strong>${escapeHtml(enrollmentState.label)}</strong>
+                      ${enrollment.messages?.length ? `<span>Message: ${escapeHtml(enrollment.messages[enrollment.messages.length - 1].message)}</span>` : ""}
                       <span>${escapeHtml(`Registered ${formatDate(enrollment.createdAt) || "date unavailable"}`)}</span>
                     </div>
                     <div>
@@ -4968,6 +5098,30 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     `;
   }
 
+  function enrollmentRejectModal(enrollmentId) {
+    const request = pendingEnrollmentRequests.find((item) => item.id === enrollmentId);
+    return `
+      <div class="modal-backdrop" data-enrollment-reject-modal>
+        <form class="operation-panel enrollment-reject-modal-panel" data-enrollment-reject-form>
+          <div class="workspace-heading">
+            <h3>Reject enrollment request</h3>
+            <p>${escapeHtml(request ? `${request.childName || "Student"} - ${request.className || "Class"}` : "Explain why this request is being rejected.")}</p>
+          </div>
+          <label class="form-field">
+            <span>Reason <span class="required-marker">*</span></span>
+            <textarea name="rejectionMessage" maxlength="2000" required rows="6" placeholder="Tell the parent why this enrollment request cannot be approved."></textarea>
+          </label>
+          <div class="row-actions modal-actions">
+            <button class="secondary-button" data-enrollment-reject-cancel type="button">Cancel</button>
+            <button class="primary-button" type="submit" ${enrollmentRejectSubmitting ? "disabled" : ""}>
+              ${enrollmentRejectSubmitting ? "Sending..." : "Reject request"}
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+  }
+
   function selectedEnrollmentCalendar() {
     const enrollment = selectedEnrollment();
     if (!enrollment) {
@@ -4990,6 +5144,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     const records = attendanceRecords.filter((record) =>
       record.childId === enrollment.childId && record.classId === enrollment.classId
     );
+    const summary = attendanceSummary(classRecord, records);
     return `
       <section class="attendance-calendar-panel" aria-label="Enrollment attendance calendar">
         <div class="workspace-heading workspace-heading-row">
@@ -4998,6 +5153,16 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             <p>${escapeHtml(`${childName(enrollment.childId)} - ${enrollmentDateRange(classRecord)} - ${classScheduleText(classRecord)}`)}</p>
           </div>
           <button class="secondary-button compact-button" data-enrollment-detail-close type="button">Back</button>
+        </div>
+        <div class="attendance-summary" aria-label="Attendance summary">
+          <div>
+            <span>Scheduled through today</span>
+            <strong>${summary.scheduled}</strong>
+          </div>
+          <div>
+            <span>Attended</span>
+            <strong>${summary.attended}</strong>
+          </div>
         </div>
         ${attendanceCalendar(classRecord, records)}
       </section>
@@ -5009,6 +5174,30 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       return null;
     }
     return enrollments.find((enrollment) => enrollment.id === selectedEnrollmentId) || null;
+  }
+
+  function attendanceSummary(classRecord, records) {
+    const today = localDateValue(new Date());
+    const lastDate = classRecord.endDate < today ? classRecord.endDate : today;
+    const scheduledDates = new Set();
+    if (classRecord.startDate <= lastDate) {
+      const cursor = dateFromLocalValue(classRecord.startDate);
+      const last = dateFromLocalValue(lastDate);
+      while (cursor <= last) {
+        const dateValue = localDateValue(cursor);
+        if (isScheduledClassDate(classRecord, dateValue)) {
+          scheduledDates.add(dateValue);
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+    const attendedDates = new Set(
+      records
+        .filter((record) => String(record.status || "").toLowerCase() === "checked_in")
+        .map((record) => record.classDate)
+        .filter((dateValue) => scheduledDates.has(dateValue))
+    );
+    return { scheduled: scheduledDates.size, attended: attendedDates.size };
   }
 
   function attendanceCalendar(classRecord, records) {
@@ -5023,7 +5212,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         <span><i class="calendar-key scheduled"></i>Scheduled</span>
         <span><i class="calendar-key missed"></i>No check-in</span>
       </div>
-      <div class="attendance-calendar-months">
+      <div class="attendance-calendar-months ${months.length === 1 ? "is-compact-single-month" : ""}">
         ${months.map((month) => attendanceCalendarMonth(classRecord, month, checkedInDates)).join("")}
       </div>
     `;
@@ -5148,7 +5337,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
     if (classRecord.classType === "weekly" && classRecord.weekdays?.length && !isScheduledClassDate(classRecord, dateValue)) {
       const weekday = dateFromLocalValue(dateValue).toLocaleDateString("en-US", { weekday: "long" });
-      return `${classRecord.name} does not meet on ${weekday}. Scheduled days are ${formatWeekdayList(classRecord.weekdays)}.`;
+      return `${classRecord.name} does not meet on ${weekday}.`;
     }
     return "";
   }
@@ -5710,7 +5899,12 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             <h3>Check in</h3>
             <p>${escapeHtml(parentAttendancePanelSummary(eligibleEnrollments))}</p>
           </div>
-          <span class="attendance-window-label">Yesterday / Today / Tomorrow</span>
+          <div class="parent-attendance-header-actions">
+            <span class="attendance-window-label">Yesterday / Today / Tomorrow</span>
+            <button class="secondary-button compact-button" data-parent-classes-refresh type="button" ${loadingClasses || loadingEnrollments || refreshingParentClasses ? "disabled" : ""}>
+              ${loadingClasses || loadingEnrollments || refreshingParentClasses ? "Refreshing..." : "Refresh classes"}
+            </button>
+          </div>
         </div>
 
         ${parentAttendanceEnrollmentGrid(eligibleEnrollments)}
@@ -5730,9 +5924,20 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
   function eligibleAttendanceEnrollments() {
     return enrollments
-      .filter((enrollment) => !["cancelled", "rejected"].includes(String(enrollment.status || "").toLowerCase()))
+      .filter((enrollment) => String(enrollment.status || "").toLowerCase() === "enrolled")
       .filter((enrollment) => children.some((child) => child.id === enrollment.childId))
       .filter((enrollment) => classes.some((classRecord) => classRecord.id === enrollment.classId));
+  }
+
+  function parentClassesToolbar() {
+    return `
+      <div class="parent-classes-toolbar">
+        <span>Classes are cached briefly in this session.</span>
+        <button class="secondary-button compact-button" data-parent-classes-refresh type="button" ${loadingClasses || refreshingParentClasses ? "disabled" : ""}>
+          ${loadingClasses || refreshingParentClasses ? "Refreshing..." : "Refresh classes"}
+        </button>
+      </div>
+    `;
   }
 
   function parentAttendanceEnrollmentGrid(eligibleEnrollments) {
@@ -5757,9 +5962,18 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           <div>
             <span>Child and class</span>
             <h4>${escapeHtml(childName(enrollment.childId))}</h4>
-            <p>${escapeHtml(classRecord ? `${classRecord.name} - ${classScheduleText(classRecord)}` : "Class details unavailable")}</p>
+            <p>${escapeHtml(classRecord ? `${classRecord.name} - ${classScheduleText(classRecord)} - ${classLocationText(classRecord, enrollment)}` : "Class details unavailable")}</p>
           </div>
-          <small>${escapeHtml(statusLabel(enrollment.status || "enrolled"))}</small>
+          <div class="parent-attendance-group-actions">
+            <small>${escapeHtml(statusLabel(enrollment.status || "enrolled"))}</small>
+            <button
+              class="secondary-button compact-button"
+              data-enrollment-overall-id="${escapeHtml(enrollment.id)}"
+              type="button"
+            >
+              View overall attendance
+            </button>
+          </div>
         </header>
 
         <div class="parent-attendance-cards" aria-label="${escapeHtml(`${childName(enrollment.childId)} check-in dates`)}">
@@ -5903,6 +6117,12 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     return time || "Time range";
   }
 
+  function classLocationText(classRecord, enrollment = null) {
+    const siteName = classRecord?.siteName || enrollment?.siteName || "";
+    const siteLocation = classRecord?.siteLocation || enrollment?.siteLocation || "";
+    return [siteName, siteLocation].filter(Boolean).join(" - ") || "Site location unavailable";
+  }
+
   function formatWeekdayList(weekdays) {
     const labels = (weekdays || []).map(formatWeekdayLabel);
     if (labels.length <= 1) {
@@ -5927,6 +6147,14 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       return false;
     }
     return !classRecord.endDate || classRecord.endDate >= localDateValue(new Date());
+  }
+
+  function effectiveClassStatus(classRecord) {
+    const status = String(classRecord?.status || "inactive").toLowerCase();
+    if (status === "active" && classRecord?.endDate && classRecord.endDate < localDateValue(new Date())) {
+      return "inactive";
+    }
+    return status;
   }
 
   function isHistoryClass(classRecord) {
@@ -6034,7 +6262,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
   }
 
-  async function loadClasses() {
+  async function loadClasses({ force = false } = {}) {
     const site = selectedSite();
     if (loadingClasses || !school?.tenantId || (role !== "PARENT" && role !== "TEACHER" && !site)) {
       return;
@@ -6044,6 +6272,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       : role === "TEACHER"
         ? `TEACHER:${school.tenantId}`
         : `${school.tenantId}:${site.id}`;
+    if (force) {
+      classListCache.delete(cacheKey);
+    }
     const cachedClasses = classListCache.get(cacheKey);
     if (cachedClasses && Date.now() - cachedClasses.loadedAt < CLASS_LIST_CACHE_TTL_MS) {
       applyLoadedClasses(cachedClasses.response);
@@ -6212,10 +6443,12 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   function invalidateClassListCache(siteId = selectedSiteId) {
-    if (!siteId) {
+    if (!school?.tenantId) {
       return;
     }
-    classListCache.delete(`${school.tenantId}:${siteId}`);
+    if (siteId) {
+      classListCache.delete(`${school.tenantId}:${siteId}`);
+    }
     classListCache.delete(`PARENT:${school.tenantId}`);
     classListCache.delete(`TEACHER:${school.tenantId}`);
   }
@@ -6281,6 +6514,43 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     if (!error) {
       notice = "Children refreshed successfully.";
       showTransientToast(notice);
+      render();
+    }
+  }
+
+  async function refreshParentClasses() {
+    if (refreshingParentClasses || role !== "PARENT") {
+      return;
+    }
+    const refreshesEnrollments = activeSectionId === "attendance";
+    refreshingParentClasses = true;
+    invalidateClassListCache();
+    if (refreshesEnrollments) {
+      invalidateParentEnrollmentCache();
+    }
+    notice = "Refreshing classes...";
+    error = "";
+    render();
+    await loadClasses({ force: true });
+    const classRefreshError = error;
+    let enrollmentRefreshError = "";
+    if (refreshesEnrollments) {
+      notice = "Refreshing classes and enrollments...";
+      error = "";
+      render();
+      await loadEnrollments({ force: true });
+      enrollmentRefreshError = error;
+    }
+    refreshingParentClasses = false;
+    if (!classRefreshError && !enrollmentRefreshError) {
+      notice = refreshesEnrollments
+        ? "Classes and enrollments refreshed successfully."
+        : "Classes refreshed successfully.";
+      showTransientToast(notice);
+      render();
+    } else {
+      notice = "";
+      error = classRefreshError || enrollmentRefreshError;
       render();
     }
   }
@@ -6373,6 +6643,43 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
   }
 
+  async function loadParentMessages() {
+    if (loadingParentMessages || !school?.tenantId || role !== "PARENT") {
+      return;
+    }
+    loadingParentMessages = true;
+    try {
+      const response = await listParentMessages(school.tenantId);
+      parentMessages = response.messages || [];
+      error = "";
+    } catch (loadError) {
+      parentMessages = [];
+      error = loadError instanceof Error ? loadError.message : "Messages could not be loaded.";
+    } finally {
+      loadingParentMessages = false;
+      render();
+    }
+  }
+
+  async function markParentMessageAsRead(messageId) {
+    if (!messageId || !school?.tenantId) {
+      return;
+    }
+    const message = parentMessages.find((item) => item.id === messageId);
+    if (!message || message.readAt) {
+      return;
+    }
+    message.readAt = new Date().toISOString();
+    render();
+    try {
+      await markParentMessageRead(school.tenantId, messageId);
+    } catch (loadError) {
+      message.readAt = null;
+      error = loadError instanceof Error ? loadError.message : "Message could not be marked as read.";
+      render();
+    }
+  }
+
   function invalidateParentEnrollmentCache() {
     if (school?.tenantId) {
       parentEnrollmentCache.delete(school.tenantId);
@@ -6423,25 +6730,47 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   async function handleEnrollmentRequestAction(action, enrollmentId) {
-    if (!enrollmentId || !school?.tenantId) {
+    if (action !== "approve" || !enrollmentId || !school?.tenantId) {
       return;
     }
     try {
-      if (action === "reject" && !window.confirm("Reject this enrollment request?")) {
-        return;
-      }
-      if (action === "approve") {
-        await approveEnrollmentRequest(school.tenantId, enrollmentId);
-        notice = "Enrollment request approved.";
-      } else {
-        await rejectEnrollmentRequest(school.tenantId, enrollmentId);
-        notice = "Enrollment request rejected.";
-      }
+      await approveEnrollmentRequest(school.tenantId, enrollmentId);
+      notice = "Enrollment request approved.";
       error = "";
       await loadPendingEnrollmentRequests();
     } catch (actionError) {
       notice = "";
       error = actionError instanceof Error ? actionError.message : "Enrollment request could not be updated.";
+      render();
+    }
+  }
+
+  async function handleEnrollmentRejectSubmit(event) {
+    event.preventDefault();
+    if (enrollmentRejectSubmitting || !enrollmentRejectId || !school?.tenantId) {
+      return;
+    }
+    const form = event.currentTarget;
+    const message = form.querySelector("[name='rejectionMessage']")?.value?.trim() || "";
+    if (!message) {
+      error = "A reason is required when rejecting an enrollment request.";
+      render();
+      return;
+    }
+    enrollmentRejectSubmitting = true;
+    error = "";
+    render();
+    try {
+      await rejectEnrollmentRequest(school.tenantId, enrollmentRejectId, message);
+      enrollmentRejectId = "";
+      enrollmentRejectSubmitting = false;
+      notice = "Enrollment request rejected.";
+      error = "";
+      await loadPendingEnrollmentRequests();
+    } catch (actionError) {
+      enrollmentRejectSubmitting = false;
+      notice = "";
+      error = actionError instanceof Error ? actionError.message : "Enrollment request could not be rejected.";
       render();
     }
   }
@@ -6621,46 +6950,6 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       error = errorMessage;
       showTransientToast(errorMessage, "error");
       render();
-    }
-  }
-
-  async function handleFamilyRegisterClick(button) {
-    const childId = button.dataset.familyRegisterChildId;
-    const classId = button.dataset.familyRegisterClassId;
-    const child = children.find((item) => item.id === childId);
-    const classRecord = classes.find((item) => item.id === classId);
-    if (!child || !classRecord) {
-      showTransientToast("Child or class could not be found.", "error");
-      return;
-    }
-
-    button.disabled = true;
-    button.textContent = "Registering";
-    try {
-      const result = await createEnrollment({
-        tenantId: school.tenantId,
-        classId,
-        childIds: [childId],
-        optionalFeeItemIds: [],
-      });
-      notice = result.paymentRequired
-        ? `${childName(childId)} enrolled in ${classRecord.name}. Payment is required before the enrollment is complete.`
-        : `${childName(childId)} enrolled in ${classRecord.name}.`;
-      error = "";
-      showTransientToast(notice);
-      invalidateParentEnrollmentCache();
-      await loadEnrollments({ force: true });
-      await loadAttendance();
-      render();
-    } catch (enrollmentError) {
-      const message = enrollmentError instanceof Error ? enrollmentError.message : "Enrollment could not be created.";
-      notice = "";
-      error = message;
-      showTransientToast(message, "error");
-      render();
-    } finally {
-      button.disabled = false;
-      button.textContent = "Register";
     }
   }
 
@@ -7274,11 +7563,7 @@ function hasTenantRole(user, tenantId, role) {
   );
 }
 
-function hasExternalAuth(user) {
-  return Array.isArray(user?.authProviders) && user.authProviders.length > 0;
-}
-
-function profileMenu(user, { profileDisabled = false } = {}) {
+function profileMenu(user) {
   const email = user?.email || "Account";
   const initial = email.trim().charAt(0).toUpperCase() || "A";
   return `
@@ -7294,9 +7579,7 @@ function profileMenu(user, { profileDisabled = false } = {}) {
       </button>
       <div class="profile-dropdown" data-profile-menu hidden>
         <p>Signed in as <strong>${escapeHtml(email)}</strong></p>
-        ${profileDisabled
-          ? `<button title="Profile editing is disabled for third-party parent sign-ins." type="button" disabled>My profile</button>`
-          : `<button data-profile-action="profile" type="button">My profile</button>`}
+        <button data-profile-action="profile" type="button">My profile</button>
         <button data-logout type="button">Sign out</button>
       </div>
     </div>

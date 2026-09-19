@@ -14,6 +14,9 @@ import com.schooldays.jooq.generated.tables.EmailNotificationHistory;
 import com.schooldays.jooq.generated.tables.EnrollmentDates;
 import com.schooldays.jooq.generated.tables.EnrollmentPerks;
 import com.schooldays.jooq.generated.tables.Enrollments;
+import com.schooldays.jooq.generated.tables.ExternalCheckIns;
+import com.schooldays.jooq.generated.tables.ExternalStudents;
+import com.schooldays.jooq.generated.tables.Messages;
 import com.schooldays.jooq.generated.tables.NotificationProviders;
 import com.schooldays.jooq.generated.tables.PaymentReceipts;
 import com.schooldays.jooq.generated.tables.PaymentTransactions;
@@ -24,6 +27,7 @@ import com.schooldays.jooq.generated.tables.TeacherAssignments;
 import com.schooldays.jooq.generated.tables.TeacherInvitations;
 import com.schooldays.jooq.generated.tables.TenantInvitations;
 import com.schooldays.jooq.generated.tables.Tenants;
+import com.schooldays.jooq.generated.tables.UserHistory;
 import com.schooldays.jooq.generated.tables.UserIdentities;
 import com.schooldays.jooq.generated.tables.UserRegistrationLinks;
 import com.schooldays.jooq.generated.tables.UserRoles;
@@ -87,6 +91,21 @@ public class Tables {
     public static final Enrollments ENROLLMENTS = Enrollments.ENROLLMENTS;
 
     /**
+     * The table <code>public.external_check_ins</code>.
+     */
+    public static final ExternalCheckIns EXTERNAL_CHECK_INS = ExternalCheckIns.EXTERNAL_CHECK_INS;
+
+    /**
+     * The table <code>public.external_students</code>.
+     */
+    public static final ExternalStudents EXTERNAL_STUDENTS = ExternalStudents.EXTERNAL_STUDENTS;
+
+    /**
+     * The table <code>public.messages</code>.
+     */
+    public static final Messages MESSAGES = Messages.MESSAGES;
+
+    /**
      * The table <code>public.notification_providers</code>.
      */
     public static final NotificationProviders NOTIFICATION_PROVIDERS = NotificationProviders.NOTIFICATION_PROVIDERS;
@@ -135,6 +154,11 @@ public class Tables {
      * The table <code>public.tenants</code>.
      */
     public static final Tenants TENANTS = Tenants.TENANTS;
+
+    /**
+     * The table <code>public.user_history</code>.
+     */
+    public static final UserHistory USER_HISTORY = UserHistory.USER_HISTORY;
 
     /**
      * The table <code>public.user_identities</code>.

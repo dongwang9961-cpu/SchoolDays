@@ -14,6 +14,9 @@ import com.schooldays.jooq.generated.tables.Classes.ClassesPath;
 import com.schooldays.jooq.generated.tables.EmailNotificationHistory.EmailNotificationHistoryPath;
 import com.schooldays.jooq.generated.tables.EnrollmentPerks.EnrollmentPerksPath;
 import com.schooldays.jooq.generated.tables.Enrollments.EnrollmentsPath;
+import com.schooldays.jooq.generated.tables.ExternalCheckIns.ExternalCheckInsPath;
+import com.schooldays.jooq.generated.tables.ExternalStudents.ExternalStudentsPath;
+import com.schooldays.jooq.generated.tables.Messages.MessagesPath;
 import com.schooldays.jooq.generated.tables.NotificationProviders.NotificationProvidersPath;
 import com.schooldays.jooq.generated.tables.PaymentReceipts.PaymentReceiptsPath;
 import com.schooldays.jooq.generated.tables.PaymentTransactions.PaymentTransactionsPath;
@@ -102,6 +105,11 @@ public class Tenants extends TableImpl<TenantsRecord> {
      * The column <code>public.tenants.updated_at</code>.
      */
     public final TableField<TenantsRecord, OffsetDateTime> UPDATED_AT = createField(DSL.name("updated_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6).nullable(false).defaultValue(DSL.field(DSL.raw("now()"), SQLDataType.TIMESTAMPWITHTIMEZONE)), this, "");
+
+    /**
+     * The column <code>public.tenants.slug</code>.
+     */
+    public final TableField<TenantsRecord, String> SLUG = createField(DSL.name("slug"), SQLDataType.VARCHAR(80), this, "");
 
     private Tenants(Name alias, Table<TenantsRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -253,6 +261,19 @@ public class Tenants extends TableImpl<TenantsRecord> {
         return _emailNotificationHistory;
     }
 
+    private transient MessagesPath _messages;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.messages</code>
+     * table
+     */
+    public MessagesPath messages() {
+        if (_messages == null)
+            _messages = new MessagesPath(this, null, Keys.MESSAGES__ENROLLMENT_MESSAGES_TENANT_ID_FKEY.getInverseKey());
+
+        return _messages;
+    }
+
     private transient EnrollmentPerksPath _enrollmentPerks;
 
     /**
@@ -277,6 +298,32 @@ public class Tenants extends TableImpl<TenantsRecord> {
             _enrollments = new EnrollmentsPath(this, null, Keys.ENROLLMENTS__ENROLLMENTS_TENANT_ID_FKEY.getInverseKey());
 
         return _enrollments;
+    }
+
+    private transient ExternalCheckInsPath _externalCheckIns;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.external_check_ins</code> table
+     */
+    public ExternalCheckInsPath externalCheckIns() {
+        if (_externalCheckIns == null)
+            _externalCheckIns = new ExternalCheckInsPath(this, null, Keys.EXTERNAL_CHECK_INS__EXTERNAL_CHECK_INS_TENANT_ID_FKEY.getInverseKey());
+
+        return _externalCheckIns;
+    }
+
+    private transient ExternalStudentsPath _externalStudents;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.external_students</code> table
+     */
+    public ExternalStudentsPath externalStudents() {
+        if (_externalStudents == null)
+            _externalStudents = new ExternalStudentsPath(this, null, Keys.EXTERNAL_STUDENTS__EXTERNAL_STUDENTS_TENANT_ID_FKEY.getInverseKey());
+
+        return _externalStudents;
     }
 
     private transient NotificationProvidersPath _notificationProviders;

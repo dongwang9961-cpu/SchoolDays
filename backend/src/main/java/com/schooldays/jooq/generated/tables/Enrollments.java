@@ -11,6 +11,7 @@ import com.schooldays.jooq.generated.tables.Children.ChildrenPath;
 import com.schooldays.jooq.generated.tables.Classes.ClassesPath;
 import com.schooldays.jooq.generated.tables.EnrollmentDates.EnrollmentDatesPath;
 import com.schooldays.jooq.generated.tables.EnrollmentPerks.EnrollmentPerksPath;
+import com.schooldays.jooq.generated.tables.Messages.MessagesPath;
 import com.schooldays.jooq.generated.tables.PaymentReceipts.PaymentReceiptsPath;
 import com.schooldays.jooq.generated.tables.PaymentTransactions.PaymentTransactionsPath;
 import com.schooldays.jooq.generated.tables.Tenants.TenantsPath;
@@ -270,6 +271,19 @@ public class Enrollments extends TableImpl<EnrollmentsRecord> {
             _enrollmentDates = new EnrollmentDatesPath(this, null, Keys.ENROLLMENT_DATES__ENROLLMENT_DATES_ENROLLMENT_ID_FKEY.getInverseKey());
 
         return _enrollmentDates;
+    }
+
+    private transient MessagesPath _messages;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.messages</code>
+     * table
+     */
+    public MessagesPath messages() {
+        if (_messages == null)
+            _messages = new MessagesPath(this, null, Keys.MESSAGES__ENROLLMENT_MESSAGES_ENROLLMENT_ID_FKEY.getInverseKey());
+
+        return _messages;
     }
 
     private transient EnrollmentPerksPath _enrollmentPerks;

@@ -112,6 +112,21 @@ public class TenantsRecord extends UpdatableRecordImpl<TenantsRecord> {
         return (OffsetDateTime) get(5);
     }
 
+    /**
+     * Setter for <code>public.tenants.slug</code>.
+     */
+    public TenantsRecord setSlug(String value) {
+        set(6, value);
+        return this;
+    }
+
+    /**
+     * Getter for <code>public.tenants.slug</code>.
+     */
+    public String getSlug() {
+        return (String) get(6);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -135,7 +150,7 @@ public class TenantsRecord extends UpdatableRecordImpl<TenantsRecord> {
     /**
      * Create a detached, initialised TenantsRecord
      */
-    public TenantsRecord(UUID id, String name, String status, JSONB metadata, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+    public TenantsRecord(UUID id, String name, String status, JSONB metadata, OffsetDateTime createdAt, OffsetDateTime updatedAt, String slug) {
         super(Tenants.TENANTS);
 
         setId(id);
@@ -144,6 +159,7 @@ public class TenantsRecord extends UpdatableRecordImpl<TenantsRecord> {
         setMetadata(metadata);
         setCreatedAt(createdAt);
         setUpdatedAt(updatedAt);
+        setSlug(slug);
         resetChangedOnNotNull();
     }
 }

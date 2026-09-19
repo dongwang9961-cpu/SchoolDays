@@ -12,6 +12,8 @@ import com.schooldays.jooq.generated.tables.Children.ChildrenPath;
 import com.schooldays.jooq.generated.tables.Classes.ClassesPath;
 import com.schooldays.jooq.generated.tables.EmailNotificationHistory.EmailNotificationHistoryPath;
 import com.schooldays.jooq.generated.tables.Enrollments.EnrollmentsPath;
+import com.schooldays.jooq.generated.tables.ExternalCheckIns.ExternalCheckInsPath;
+import com.schooldays.jooq.generated.tables.Messages.MessagesPath;
 import com.schooldays.jooq.generated.tables.NotificationProviders.NotificationProvidersPath;
 import com.schooldays.jooq.generated.tables.PaymentReceipts.PaymentReceiptsPath;
 import com.schooldays.jooq.generated.tables.PaymentTransactions.PaymentTransactionsPath;
@@ -92,7 +94,7 @@ public class Users extends TableImpl<UsersRecord> {
     /**
      * The column <code>public.users.phone</code>.
      */
-    public final TableField<UsersRecord, String> PHONE = createField(DSL.name("phone"), SQLDataType.VARCHAR(50), this, "");
+    public final TableField<UsersRecord, String> PHONE = createField(DSL.name("phone"), SQLDataType.VARCHAR(50).nullable(false), this, "");
 
     /**
      * The column <code>public.users.password_hash</code>.
@@ -255,6 +257,33 @@ public class Users extends TableImpl<UsersRecord> {
         return _emailNotificationHistory;
     }
 
+    private transient MessagesPath _enrollmentMessagesRecipientUserIdFkey;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.messages</code>
+     * table, via the <code>enrollment_messages_recipient_user_id_fkey</code>
+     * key
+     */
+    public MessagesPath enrollmentMessagesRecipientUserIdFkey() {
+        if (_enrollmentMessagesRecipientUserIdFkey == null)
+            _enrollmentMessagesRecipientUserIdFkey = new MessagesPath(this, null, Keys.MESSAGES__ENROLLMENT_MESSAGES_RECIPIENT_USER_ID_FKEY.getInverseKey());
+
+        return _enrollmentMessagesRecipientUserIdFkey;
+    }
+
+    private transient MessagesPath _enrollmentMessagesSenderUserIdFkey;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.messages</code>
+     * table, via the <code>enrollment_messages_sender_user_id_fkey</code> key
+     */
+    public MessagesPath enrollmentMessagesSenderUserIdFkey() {
+        if (_enrollmentMessagesSenderUserIdFkey == null)
+            _enrollmentMessagesSenderUserIdFkey = new MessagesPath(this, null, Keys.MESSAGES__ENROLLMENT_MESSAGES_SENDER_USER_ID_FKEY.getInverseKey());
+
+        return _enrollmentMessagesSenderUserIdFkey;
+    }
+
     private transient EnrollmentsPath _enrollments;
 
     /**
@@ -266,6 +295,19 @@ public class Users extends TableImpl<UsersRecord> {
             _enrollments = new EnrollmentsPath(this, null, Keys.ENROLLMENTS__ENROLLMENTS_CREATED_BY_USER_ID_FKEY.getInverseKey());
 
         return _enrollments;
+    }
+
+    private transient ExternalCheckInsPath _externalCheckIns;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.external_check_ins</code> table
+     */
+    public ExternalCheckInsPath externalCheckIns() {
+        if (_externalCheckIns == null)
+            _externalCheckIns = new ExternalCheckInsPath(this, null, Keys.EXTERNAL_CHECK_INS__EXTERNAL_CHECK_INS_CHECKED_IN_BY_USER_ID_FKEY.getInverseKey());
+
+        return _externalCheckIns;
     }
 
     private transient TenantInvitationsPath _tenantInvitations;

@@ -14,6 +14,9 @@ import com.schooldays.jooq.generated.tables.EmailNotificationHistory;
 import com.schooldays.jooq.generated.tables.EnrollmentDates;
 import com.schooldays.jooq.generated.tables.EnrollmentPerks;
 import com.schooldays.jooq.generated.tables.Enrollments;
+import com.schooldays.jooq.generated.tables.ExternalCheckIns;
+import com.schooldays.jooq.generated.tables.ExternalStudents;
+import com.schooldays.jooq.generated.tables.Messages;
 import com.schooldays.jooq.generated.tables.NotificationProviders;
 import com.schooldays.jooq.generated.tables.PaymentReceipts;
 import com.schooldays.jooq.generated.tables.PaymentTransactions;
@@ -24,6 +27,7 @@ import com.schooldays.jooq.generated.tables.TeacherAssignments;
 import com.schooldays.jooq.generated.tables.TeacherInvitations;
 import com.schooldays.jooq.generated.tables.TenantInvitations;
 import com.schooldays.jooq.generated.tables.Tenants;
+import com.schooldays.jooq.generated.tables.UserHistory;
 import com.schooldays.jooq.generated.tables.UserIdentities;
 import com.schooldays.jooq.generated.tables.UserRegistrationLinks;
 import com.schooldays.jooq.generated.tables.UserRoles;
@@ -33,6 +37,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.jooq.Catalog;
+import org.jooq.Sequence;
 import org.jooq.Table;
 import org.jooq.impl.SchemaImpl;
 
@@ -101,6 +106,21 @@ public class Public extends SchemaImpl {
     public final Enrollments ENROLLMENTS = Enrollments.ENROLLMENTS;
 
     /**
+     * The table <code>public.external_check_ins</code>.
+     */
+    public final ExternalCheckIns EXTERNAL_CHECK_INS = ExternalCheckIns.EXTERNAL_CHECK_INS;
+
+    /**
+     * The table <code>public.external_students</code>.
+     */
+    public final ExternalStudents EXTERNAL_STUDENTS = ExternalStudents.EXTERNAL_STUDENTS;
+
+    /**
+     * The table <code>public.messages</code>.
+     */
+    public final Messages MESSAGES = Messages.MESSAGES;
+
+    /**
      * The table <code>public.notification_providers</code>.
      */
     public final NotificationProviders NOTIFICATION_PROVIDERS = NotificationProviders.NOTIFICATION_PROVIDERS;
@@ -151,6 +171,11 @@ public class Public extends SchemaImpl {
     public final Tenants TENANTS = Tenants.TENANTS;
 
     /**
+     * The table <code>public.user_history</code>.
+     */
+    public final UserHistory USER_HISTORY = UserHistory.USER_HISTORY;
+
+    /**
      * The table <code>public.user_identities</code>.
      */
     public final UserIdentities USER_IDENTITIES = UserIdentities.USER_IDENTITIES;
@@ -184,6 +209,13 @@ public class Public extends SchemaImpl {
     }
 
     @Override
+    public final List<Sequence<?>> getSequences() {
+        return Arrays.asList(
+            Sequences.ENROLLMENT_MESSAGES_SEQ_ID_SEQ
+        );
+    }
+
+    @Override
     public final List<Table<?>> getTables() {
         return Arrays.asList(
             Attendance.ATTENDANCE,
@@ -196,6 +228,9 @@ public class Public extends SchemaImpl {
             EnrollmentDates.ENROLLMENT_DATES,
             EnrollmentPerks.ENROLLMENT_PERKS,
             Enrollments.ENROLLMENTS,
+            ExternalCheckIns.EXTERNAL_CHECK_INS,
+            ExternalStudents.EXTERNAL_STUDENTS,
+            Messages.MESSAGES,
             NotificationProviders.NOTIFICATION_PROVIDERS,
             PaymentReceipts.PAYMENT_RECEIPTS,
             PaymentTransactions.PAYMENT_TRANSACTIONS,
@@ -206,6 +241,7 @@ public class Public extends SchemaImpl {
             TeacherInvitations.TEACHER_INVITATIONS,
             TenantInvitations.TENANT_INVITATIONS,
             Tenants.TENANTS,
+            UserHistory.USER_HISTORY,
             UserIdentities.USER_IDENTITIES,
             UserRegistrationLinks.USER_REGISTRATION_LINKS,
             UserRoles.USER_ROLES,

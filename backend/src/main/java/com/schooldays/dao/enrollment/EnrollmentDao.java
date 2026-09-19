@@ -6,7 +6,9 @@ import static com.schooldays.jooq.generated.tables.Classes.CLASSES;
 import static com.schooldays.jooq.generated.tables.Children.CHILDREN;
 import static com.schooldays.jooq.generated.tables.EnrollmentPerks.ENROLLMENT_PERKS;
 import static com.schooldays.jooq.generated.tables.Enrollments.ENROLLMENTS;
+import static com.schooldays.jooq.generated.tables.Messages.MESSAGES;
 import static com.schooldays.jooq.generated.tables.Programs.PROGRAMS;
+import static com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES;
 import static com.schooldays.jooq.generated.tables.Users.USERS;
 
 import java.time.OffsetDateTime;
@@ -21,6 +23,8 @@ import com.schooldays.jooq.generated.tables.records.EnrollmentsRecord;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
 import org.jooq.Record;
+import org.jooq.Field;
+import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -92,6 +96,88 @@ public class EnrollmentDao {
                 .fetchOptional();
     }
 
+    public Optional<UUID> findParentUserId(UUID tenantId, UUID childId) {
+        return dsl.select(CHILDREN.PARENT_USER_ID)
+                .from(CHILDREN)
+                .where(CHILDREN.TENANT_ID.eq(tenantId))
+                .and(CHILDREN.ID.eq(childId))
+                .fetchOptional(CHILDREN.PARENT_USER_ID);
+    }
+
+    public void insertMessage(
+            UUID tenantId,
+            UUID enrollmentId,
+            UUID senderUserId,
+            UUID recipientUserId,
+            String messageType,
+            String body,
+            OffsetDateTime now
+    ) {
+        dsl.insertInto(MESSAGES)
+                .set(MESSAGES.TENANT_ID, tenantId)
+                .set(MESSAGES.ENROLLMENT_ID, enrollmentId)
+                .set(MESSAGES.SENDER_USER_ID, senderUserId)
+                .set(MESSAGES.RECIPIENT_USER_ID, recipientUserId)
+                .set(MESSAGES.MESSAGE_TYPE, messageType)
+                .set(MESSAGES.BODY, body.trim())
+                .set(MESSAGES.CREATED_AT, now)
+                .set(MESSAGES.UPDATED_AT, now)
+                .execute();
+    }
+
+    public List<? extends Record> listParentEnrollmentMessages(UUID tenantId, UUID enrollmentId, UUID parentUserId) {
+        return dsl.select(MESSAGES.ID, MESSAGES.MESSAGE_TYPE, MESSAGES.BODY, MESSAGES.CREATED_AT, MESSAGES.READ_AT)
+                .from(MESSAGES)
+                .where(MESSAGES.TENANT_ID.eq(tenantId))
+                .and(MESSAGES.ENROLLMENT_ID.eq(enrollmentId))
+                .and(MESSAGES.RECIPIENT_USER_ID.eq(parentUserId))
+                .orderBy(MESSAGES.CREATED_AT.asc(), MESSAGES.SEQ_ID.asc())
+                .fetch();
+    }
+
+    public List<? extends Record> listParentMessages(UUID tenantId, UUID parentUserId) {
+        Field<UUID> childIdExpression = DSL.coalesce(MESSAGES.CHILD_ID, ENROLLMENTS.CHILD_ID);
+        Field<UUID> classIdExpression = DSL.coalesce(MESSAGES.CLASS_ID, ENROLLMENTS.CLASS_ID);
+        Field<UUID> childId = childIdExpression.as("child_id");
+        Field<UUID> classId = classIdExpression.as("class_id");
+        Field<String> childName = DSL.concat(
+                DSL.coalesce(CHILDREN.FIRST_NAME, DSL.inline("")),
+                DSL.inline(" "),
+                DSL.coalesce(CHILDREN.LAST_NAME, DSL.inline(""))
+        ).as("child_name");
+        return dsl.select(
+                        MESSAGES.ID,
+                        MESSAGES.MESSAGE_TYPE,
+                        MESSAGES.BODY,
+                        MESSAGES.ENROLLMENT_ID,
+                        childId,
+                        childName,
+                        classId,
+                        CLASSES.NAME.as("class_name"),
+                        MESSAGES.CREATED_AT,
+                        MESSAGES.READ_AT,
+                        MESSAGES.SEQ_ID
+                )
+                .from(MESSAGES)
+                .leftJoin(ENROLLMENTS).on(ENROLLMENTS.ID.eq(MESSAGES.ENROLLMENT_ID).and(ENROLLMENTS.TENANT_ID.eq(MESSAGES.TENANT_ID)))
+                .leftJoin(CHILDREN).on(CHILDREN.ID.eq(childIdExpression).and(CHILDREN.TENANT_ID.eq(MESSAGES.TENANT_ID)))
+                .leftJoin(CLASSES).on(CLASSES.ID.eq(classIdExpression).and(CLASSES.TENANT_ID.eq(MESSAGES.TENANT_ID)))
+                .where(MESSAGES.TENANT_ID.eq(tenantId))
+                .and(MESSAGES.RECIPIENT_USER_ID.eq(parentUserId))
+                .orderBy(MESSAGES.CREATED_AT.desc(), MESSAGES.SEQ_ID.desc())
+                .fetch();
+    }
+
+    public boolean markParentMessageRead(UUID tenantId, UUID parentUserId, UUID messageId, OffsetDateTime now) {
+        return dsl.update(MESSAGES)
+                .set(MESSAGES.READ_AT, DSL.coalesce(MESSAGES.READ_AT, DSL.val(now)))
+                .set(MESSAGES.UPDATED_AT, now)
+                .where(MESSAGES.ID.eq(messageId))
+                .and(MESSAGES.TENANT_ID.eq(tenantId))
+                .and(MESSAGES.RECIPIENT_USER_ID.eq(parentUserId))
+                .execute() > 0;
+    }
+
     public void updateEnrollmentStatus(UUID tenantId, UUID enrollmentId, String status, OffsetDateTime now) {
         dsl.update(ENROLLMENTS)
                 .set(ENROLLMENTS.ENROLLMENT_STATUS, status)
@@ -124,9 +210,12 @@ public class EnrollmentDao {
     public List<Record> listParentEnrollments(UUID tenantId, UUID parentUserId) {
         return dsl.select(ENROLLMENTS.fields())
                 .select(CLASSES.NAME, CLASSES.START_DATE, CLASSES.END_DATE, CLASSES.STATUS)
+                .select(SCHOOL_SITES.fields())
                 .from(ENROLLMENTS)
                 .join(CHILDREN).on(CHILDREN.ID.eq(ENROLLMENTS.CHILD_ID))
                 .join(CLASSES).on(CLASSES.ID.eq(ENROLLMENTS.CLASS_ID))
+                .join(PROGRAMS).on(PROGRAMS.ID.eq(CLASSES.PROGRAM_ID))
+                .join(SCHOOL_SITES).on(SCHOOL_SITES.ID.eq(PROGRAMS.SITE_ID))
                 .where(ENROLLMENTS.TENANT_ID.eq(tenantId))
                 .and(CHILDREN.PARENT_USER_ID.eq(parentUserId))
                 .orderBy(ENROLLMENTS.CREATED_AT.desc(), ENROLLMENTS.SEQ_ID.desc())

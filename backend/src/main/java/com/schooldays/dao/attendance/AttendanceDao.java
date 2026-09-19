@@ -79,7 +79,7 @@ public class AttendanceDao {
                 .where(ENROLLMENTS.TENANT_ID.eq(tenantId))
                 .and(ENROLLMENTS.CHILD_ID.eq(childId))
                 .and(ENROLLMENTS.CLASS_ID.eq(classId))
-                .and(ENROLLMENTS.ENROLLMENT_STATUS.notIn("cancelled", "rejected")));
+                .and(ENROLLMENTS.ENROLLMENT_STATUS.eq("enrolled")));
     }
 
     public AttendanceRecord checkIn(

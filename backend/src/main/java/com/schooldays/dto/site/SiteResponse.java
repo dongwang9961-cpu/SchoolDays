@@ -33,6 +33,15 @@ public record SiteResponse(
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    public String displayLocation() {
+        if (formattedAddress != null && !formattedAddress.isBlank()) {
+            return formattedAddress;
+        }
+        return java.util.stream.Stream.of(streetAddress, city, state, zipCode)
+                .filter(value -> value != null && !value.isBlank())
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
     public static SiteResponse from(SchoolSitesRecord record) {
         JsonNode metadata = metadata(record);
         return new SiteResponse(

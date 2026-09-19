@@ -28,12 +28,18 @@ public record ClassResponse(
         LocalTime endTime,
         String status,
         OffsetDateTime createdAt,
-        OffsetDateTime updatedAt
+        OffsetDateTime updatedAt,
+        String siteName,
+        String siteLocation
 ) {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     public static ClassResponse from(ClassesRecord record) {
+        return from(record, null, null);
+    }
+
+    public static ClassResponse from(ClassesRecord record, String siteName, String siteLocation) {
         JsonNode metadata = metadata(record);
         return new ClassResponse(
                 record.getId(),
@@ -53,7 +59,9 @@ public record ClassResponse(
                 time(metadata, "endTime"),
                 record.getStatus(),
                 record.getCreatedAt(),
-                record.getUpdatedAt()
+                record.getUpdatedAt(),
+                siteName,
+                siteLocation
         );
     }
 

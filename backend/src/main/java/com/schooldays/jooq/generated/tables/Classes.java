@@ -11,6 +11,8 @@ import com.schooldays.jooq.generated.tables.Attendance.AttendancePath;
 import com.schooldays.jooq.generated.tables.ClassPricing.ClassPricingPath;
 import com.schooldays.jooq.generated.tables.ClassSchedules.ClassSchedulesPath;
 import com.schooldays.jooq.generated.tables.Enrollments.EnrollmentsPath;
+import com.schooldays.jooq.generated.tables.ExternalCheckIns.ExternalCheckInsPath;
+import com.schooldays.jooq.generated.tables.Messages.MessagesPath;
 import com.schooldays.jooq.generated.tables.Programs.ProgramsPath;
 import com.schooldays.jooq.generated.tables.TeacherAssignments.TeacherAssignmentsPath;
 import com.schooldays.jooq.generated.tables.Tenants.TenantsPath;
@@ -306,6 +308,32 @@ public class Classes extends TableImpl<ClassesRecord> {
             _enrollments = new EnrollmentsPath(this, null, Keys.ENROLLMENTS__ENROLLMENTS_CLASS_ID_FKEY.getInverseKey());
 
         return _enrollments;
+    }
+
+    private transient ExternalCheckInsPath _externalCheckIns;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.external_check_ins</code> table
+     */
+    public ExternalCheckInsPath externalCheckIns() {
+        if (_externalCheckIns == null)
+            _externalCheckIns = new ExternalCheckInsPath(this, null, Keys.EXTERNAL_CHECK_INS__EXTERNAL_CHECK_INS_CLASS_ID_FKEY.getInverseKey());
+
+        return _externalCheckIns;
+    }
+
+    private transient MessagesPath _messages;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.messages</code>
+     * table
+     */
+    public MessagesPath messages() {
+        if (_messages == null)
+            _messages = new MessagesPath(this, null, Keys.MESSAGES__MESSAGES_CLASS_ID_FKEY.getInverseKey());
+
+        return _messages;
     }
 
     private transient TeacherAssignmentsPath _teacherAssignments;

@@ -12,8 +12,12 @@ import com.schooldays.dao.enrollment.EnrollmentDao;
 import com.schooldays.dto.enrollment.CreateEnrollmentRequest;
 import com.schooldays.dto.enrollment.CreateEnrollmentResponse;
 import com.schooldays.dto.enrollment.EnrollmentListResponse;
+import com.schooldays.dto.enrollment.EnrollmentMessageResponse;
 import com.schooldays.dto.enrollment.EnrollmentRequestResponse;
 import com.schooldays.dto.enrollment.EnrollmentResponse;
+import com.schooldays.dto.enrollment.MessageListResponse;
+import com.schooldays.dto.enrollment.MessageResponse;
+import com.schooldays.dto.site.SiteResponse;
 import com.schooldays.jooq.generated.tables.records.ClassFeeItemsRecord;
 import com.schooldays.jooq.generated.tables.records.ClassesRecord;
 import com.schooldays.jooq.generated.tables.records.ChildrenRecord;
@@ -46,17 +50,59 @@ public class EnrollmentService {
         List<EnrollmentResponse> enrollments = enrollmentDao.listParentEnrollments(tenantId, parentUserId).stream()
                 .map(record -> {
                     EnrollmentsRecord enrollment = record.into(EnrollmentsRecord.class);
+                    SiteResponse site = SiteResponse.from(record.into(com.schooldays.jooq.generated.tables.SchoolSites.SCHOOL_SITES));
+                    List<EnrollmentMessageResponse> messages = enrollmentDao
+                            .listParentEnrollmentMessages(tenantId, enrollment.getId(), parentUserId)
+                            .stream()
+                            .map(message -> new EnrollmentMessageResponse(
+                                    message.get("id", UUID.class),
+                                    message.get("message_type", String.class),
+                                    message.get("body", String.class),
+                                    message.get("created_at", OffsetDateTime.class),
+                                    message.get("read_at", OffsetDateTime.class)
+                            ))
+                            .toList();
                     return EnrollmentResponse.from(
                             enrollment,
                             enrollmentDao.selectedOptionalFeeItemIds(enrollment.getId()),
                             record.get(CLASSES.NAME),
                             record.get(CLASSES.START_DATE),
                             record.get(CLASSES.END_DATE),
-                            record.get(CLASSES.STATUS)
+                            record.get(CLASSES.STATUS),
+                            site.name(),
+                            site.displayLocation(),
+                            messages
                     );
                 })
                 .toList();
         return new EnrollmentListResponse(enrollments);
+    }
+
+    @Transactional(readOnly = true)
+    public MessageListResponse listParentMessages(UUID tenantId, UUID parentUserId) {
+        List<MessageResponse> messages = enrollmentDao.listParentMessages(tenantId, parentUserId)
+                .stream()
+                .map(message -> new MessageResponse(
+                        message.get("id", UUID.class),
+                        message.get("message_type", String.class),
+                        message.get("body", String.class),
+                        message.get("enrollment_id", UUID.class),
+                        message.get("child_id", UUID.class),
+                        message.get("child_name", String.class),
+                        message.get("class_id", UUID.class),
+                        message.get("class_name", String.class),
+                        message.get("created_at", OffsetDateTime.class),
+                        message.get("read_at", OffsetDateTime.class)
+                ))
+                .toList();
+        return new MessageListResponse(messages);
+    }
+
+    @Transactional
+    public void markParentMessageRead(UUID tenantId, UUID parentUserId, UUID messageId) {
+        if (!enrollmentDao.markParentMessageRead(tenantId, parentUserId, messageId, OffsetDateTime.now())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Message was not found");
+        }
     }
 
     @Transactional(readOnly = true)
@@ -96,10 +142,22 @@ public class EnrollmentService {
     }
 
     @Transactional
-    public void rejectEnrollment(UUID tenantId, UUID enrollmentId) {
-        enrollmentDao.findPendingEnrollment(tenantId, enrollmentId)
+    public void rejectEnrollment(UUID tenantId, UUID enrollmentId, UUID reviewerUserId, String reason) {
+        EnrollmentsRecord enrollment = enrollmentDao.findPendingEnrollment(tenantId, enrollmentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pending enrollment request was not found"));
-        enrollmentDao.updateEnrollmentStatus(tenantId, enrollmentId, "rejected", OffsetDateTime.now());
+        UUID parentUserId = enrollmentDao.findParentUserId(tenantId, enrollment.getChildId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "The child parent was not found"));
+        OffsetDateTime now = OffsetDateTime.now();
+        enrollmentDao.updateEnrollmentStatus(tenantId, enrollmentId, "rejected", now);
+        enrollmentDao.insertMessage(
+                tenantId,
+                enrollmentId,
+                reviewerUserId,
+                parentUserId,
+                "enrollment_rejected",
+                reason,
+                now
+        );
     }
 
     @Transactional

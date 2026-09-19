@@ -19,8 +19,11 @@ public record EnrollmentResponse(
         String classStatus,
         String status,
         List<UUID> selectedOptionalFeeItemIds,
+        List<EnrollmentMessageResponse> messages,
         OffsetDateTime createdAt,
-        OffsetDateTime updatedAt
+        OffsetDateTime updatedAt,
+        String siteName,
+        String siteLocation
 ) {
 
     public static EnrollmentResponse from(
@@ -29,7 +32,10 @@ public record EnrollmentResponse(
             String className,
             LocalDate classStartDate,
             LocalDate classEndDate,
-            String classStatus
+            String classStatus,
+            String siteName,
+            String siteLocation,
+            List<EnrollmentMessageResponse> messages
     ) {
         return new EnrollmentResponse(
                 record.getId(),
@@ -43,9 +49,23 @@ public record EnrollmentResponse(
                 classStatus,
                 record.getEnrollmentStatus(),
                 selectedOptionalFeeItemIds == null ? List.of() : selectedOptionalFeeItemIds,
+                messages == null ? List.of() : messages,
                 record.getCreatedAt(),
-                record.getUpdatedAt()
+                record.getUpdatedAt(),
+                siteName,
+                siteLocation
         );
+    }
+
+    public static EnrollmentResponse from(
+            EnrollmentsRecord record,
+            List<UUID> selectedOptionalFeeItemIds,
+            String className,
+            LocalDate classStartDate,
+            LocalDate classEndDate,
+            String classStatus
+    ) {
+        return from(record, selectedOptionalFeeItemIds, className, classStartDate, classEndDate, classStatus, null, null, List.of());
     }
 
     public static EnrollmentResponse from(EnrollmentsRecord record, List<UUID> selectedOptionalFeeItemIds) {

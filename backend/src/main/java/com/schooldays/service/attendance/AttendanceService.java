@@ -1,13 +1,11 @@
 package com.schooldays.service.attendance;
 
-import java.time.DayOfWeek;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.time.format.TextStyle;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -256,11 +254,10 @@ public class AttendanceService {
             if (!weekdays.contains(requestedWeekday)) {
                 throw new ResponseStatusException(
                         HttpStatus.BAD_REQUEST,
-                        "%s does not meet on %s. Scheduled days are %s."
+                        "%s does not meet on %s."
                                 .formatted(
                                         classRecord.getName(),
-                                        classDate.format(FRIENDLY_DATE_FORMAT),
-                                        formatWeekdays(weekdays)
+                                        classDate.format(FRIENDLY_DATE_FORMAT)
                                 )
                 );
             }
@@ -327,27 +324,6 @@ public class AttendanceService {
 
     private String formatShortDate(LocalDate date) {
         return date.format(DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.US));
-    }
-
-    private String formatWeekdays(List<String> weekdays) {
-        List<String> labels = weekdays.stream()
-                .map(this::formatWeekday)
-                .toList();
-        if (labels.size() == 1) {
-            return labels.get(0);
-        }
-        return String.join(", ", labels.subList(0, labels.size() - 1)) + " and " + labels.get(labels.size() - 1);
-    }
-
-    private String formatWeekday(String weekday) {
-        try {
-            return DayOfWeek.valueOf(weekday).getDisplayName(TextStyle.FULL, Locale.US);
-        } catch (IllegalArgumentException ignored) {
-            String normalized = weekday == null ? "" : weekday.trim().toLowerCase(Locale.US).replace('_', ' ');
-            return normalized.isBlank()
-                    ? "Scheduled day"
-                    : normalized.substring(0, 1).toUpperCase(Locale.US) + normalized.substring(1);
-        }
     }
 
     private JsonNode classMetadata(ClassesRecord classRecord) {

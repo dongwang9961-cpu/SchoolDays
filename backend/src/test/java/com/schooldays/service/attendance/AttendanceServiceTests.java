@@ -170,6 +170,26 @@ class AttendanceServiceTests {
     }
 
     @Test
+    void parentCannotCheckInAChildWithPendingEnrollment() {
+        dsl.update(ENROLLMENTS)
+                .set(ENROLLMENTS.ENROLLMENT_STATUS, "pending")
+                .where(ENROLLMENTS.CHILD_ID.eq(childId))
+                .and(ENROLLMENTS.CLASS_ID.eq(classId))
+                .execute();
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> attendanceService.parentCheckIn(
+                        parentUserId,
+                        new AttendanceCheckInRequest(tenantId, childId, classId, LocalDate.parse("2026-07-15"))
+                )
+        );
+
+        assertThat(exception.getReason()).isEqualTo("Child must be enrolled in this class before check-in");
+        assertThat(dsl.fetchCount(ATTENDANCE)).isZero();
+    }
+
+    @Test
     void classAttendanceGridIncludesRosterDatesAndCheckIns() {
         assertThat(attendanceService.getClassAttendanceGrid(tenantId, classId).students())
                 .singleElement()
@@ -225,7 +245,7 @@ class AttendanceServiceTests {
         );
 
         assertThat(exception.getReason())
-                .isEqualTo("Morning Art does not meet on Thursday, July 16, 2026. Scheduled days are Monday and Wednesday.");
+                .isEqualTo("Morning Art does not meet on Thursday, July 16, 2026.");
         assertThat(dsl.fetchCount(ATTENDANCE)).isZero();
     }
 

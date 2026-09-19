@@ -863,6 +863,12 @@ button:disabled {
   width: min(100%, 820px);
 }
 
+.enrollment-reject-modal-panel {
+  background: #ffffff;
+  max-width: 560px;
+  width: min(100%, 560px);
+}
+
 .enrollment-summary {
   border: 1px solid #d8deeb;
   border-radius: 8px;
@@ -1000,6 +1006,12 @@ button:disabled {
   justify-content: space-between;
 }
 
+.workspace-panel-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 .data-list {
   border: 1px solid #d8deeb;
   border-radius: 6px;
@@ -1052,6 +1064,116 @@ button:disabled {
 .family-metric strong {
   color: #172033;
   font-size: 1.45rem;
+}
+
+.parent-messages-header-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #52627a;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+}
+
+.parent-messages-header-button:hover,
+.parent-messages-header-button:focus-visible {
+  color: #1554a0;
+}
+
+.parent-messages-header-button.has-unread {
+  color: #b91c1c;
+}
+
+.parent-messages-icon {
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.parent-messages-header-button strong {
+  align-items: center;
+  background: #6b7280;
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 0.75rem;
+  height: 20px;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 5px;
+  transform: translate(-4px, -8px);
+}
+
+.parent-messages-header-button.has-unread strong {
+  background: #dc2626;
+}
+
+.family-messages-panel {
+  background: #ffffff;
+  border: 1px solid #d8deeb;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.parent-messages-popup {
+  max-height: min(720px, calc(100vh - 48px));
+  max-width: 760px;
+  overflow: auto;
+  width: min(100%, 760px);
+}
+
+.family-message-list {
+  border: 1px solid #e6ebf3;
+  border-radius: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.family-message-row {
+  background: #ffffff;
+  border: 0;
+  border-bottom: 1px solid #e6ebf3;
+  color: #344258;
+  cursor: pointer;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.family-message-row:last-child {
+  border-bottom: 0;
+}
+
+.family-message-row:hover,
+.family-message-row:focus-visible {
+  background: #f7faff;
+}
+
+.family-message-row.is-unread {
+  background: #eef5ff;
+  color: #172033;
+}
+
+.family-message-row-header {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.family-message-row-header strong {
+  color: #172033;
+}
+
+.family-message-row-header time,
+.family-message-context {
+  color: #6b7b91;
+  font-size: 0.8rem;
 }
 
 .family-child-grid {
@@ -1194,6 +1316,47 @@ button:disabled {
   gap: 8px;
 }
 
+.family-suggested-classes {
+  background: #f4f8ff;
+  border: 1px solid #cddcf2;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.family-section-heading {
+  align-items: start;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.family-section-heading h4 {
+  color: #213653;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.family-section-heading p {
+  color: #536681;
+  font-size: 0.86rem;
+  margin: 4px 0 0;
+}
+
+.family-open-class-list {
+  border: 1px solid #d7e1f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.family-suggested-class-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .family-enrollment-tabs {
   background: #eef2f8;
   border: 1px solid #d7dfec;
@@ -1201,6 +1364,7 @@ button:disabled {
   display: grid;
   gap: 3px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  height: 74px;
   padding: 3px;
 }
 
@@ -1226,6 +1390,13 @@ button:disabled {
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(24, 35, 58, 0.14);
   color: #1554a0;
+}
+
+.family-enrollment-tab-panel {
+  height: 230px;
+  min-height: 230px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .workspace-tabs {
@@ -1337,15 +1508,23 @@ button:disabled {
   font-weight: 800;
 }
 
-.family-class-row.is-inactive,
 .family-class-row.is-closed {
   background: #f1f3f5;
   border-left-color: #6b7280;
 }
 
-.family-class-row.is-inactive small,
 .family-class-row.is-closed small {
   color: #4b5563;
+  font-weight: 800;
+}
+
+.family-class-row.is-inactive {
+  background: #f5f3ff;
+  border-left-color: #8b5cf6;
+}
+
+.family-class-row.is-inactive small {
+  color: #6d28d9;
   font-weight: 800;
 }
 
@@ -1375,6 +1554,28 @@ button:disabled {
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) auto;
   padding: 10px 12px;
+}
+
+.family-suggested-class-row {
+  border: 0;
+  border-bottom: 1px solid #d7e1f0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.family-suggested-class-row:hover,
+.family-suggested-class-row:focus-visible {
+  background: #eaf2ff;
+}
+
+.family-suggested-class-cta {
+  color: #1554a0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .family-open-class-row:last-child {
@@ -1437,6 +1638,7 @@ button:disabled {
 
 .enrollment-row {
   align-items: start;
+  border-bottom: 1px solid #c4cfdd;
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.8fr);
@@ -1498,6 +1700,23 @@ button:disabled {
 
 .enrollment-cache-note {
   margin-right: auto;
+}
+
+.parent-classes-toolbar {
+  align-items: center;
+  color: #5f6f86;
+  display: flex;
+  font-size: 0.88rem;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.parent-attendance-header-actions {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .list-filter-bar {
@@ -1589,10 +1808,14 @@ button:disabled {
   box-shadow: inset 4px 0 0 #d97706;
 }
 
-.enrollment-detail-row.is-inactive,
 .enrollment-detail-row.is-closed {
   background: #f1f3f5;
   box-shadow: inset 4px 0 0 #6b7280;
+}
+
+.enrollment-detail-row.is-inactive {
+  background: #f5f3ff;
+  box-shadow: inset 4px 0 0 #8b5cf6;
 }
 
 .enrollment-detail-row.is-active:hover,
@@ -1605,11 +1828,14 @@ button:disabled {
   background: #fff0c2;
 }
 
-.enrollment-detail-row.is-inactive:hover,
-.enrollment-detail-row.is-inactive.is-selected,
 .enrollment-detail-row.is-closed:hover,
 .enrollment-detail-row.is-closed.is-selected {
   background: #e5e7eb;
+}
+
+.enrollment-detail-row.is-inactive:hover,
+.enrollment-detail-row.is-inactive.is-selected {
+  background: #ede9fe;
 }
 
 .attendance-calendar-panel {
@@ -1644,6 +1870,33 @@ button:disabled {
   white-space: nowrap;
 }
 
+.attendance-summary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.attendance-summary div {
+  background: #f8fafc;
+  border: 1px solid #c4cfdd;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.attendance-summary span {
+  color: #5f6f86;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.attendance-summary strong {
+  color: #172033;
+  font-size: 1.35rem;
+}
+
 .parent-attendance-group-grid {
   display: grid;
   gap: 18px;
@@ -1670,6 +1923,14 @@ button:disabled {
 
 .parent-attendance-group header div {
   min-width: 0;
+}
+
+.parent-attendance-group-actions {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .parent-attendance-group h4 {
@@ -1940,6 +2201,17 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.attendance-calendar-months.is-compact-single-month {
+  grid-template-columns: repeat(3, 320px);
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.attendance-calendar-months.is-compact-single-month .attendance-calendar-month {
+  width: 320px;
+}
+
 .attendance-calendar-month {
   display: grid;
   gap: 8px;
@@ -2073,6 +2345,7 @@ button.calendar-day.is-selected {
 
 .class-row {
   align-items: center;
+  border-bottom: 1px solid #c4cfdd;
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) auto;

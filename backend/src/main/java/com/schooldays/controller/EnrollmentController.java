@@ -18,7 +18,9 @@ import com.schooldays.dto.api.EndpointStatusResponse;
 import com.schooldays.dto.enrollment.CreateEnrollmentRequest;
 import com.schooldays.dto.enrollment.CreateEnrollmentResponse;
 import com.schooldays.dto.enrollment.EnrollmentListResponse;
+import com.schooldays.dto.enrollment.RejectEnrollmentRequest;
 import com.schooldays.dto.enrollment.EnrollmentRequestResponse;
+import com.schooldays.dto.enrollment.MessageListResponse;
 import com.schooldays.dto.pricing.ClassPricingResponse;
 import com.schooldays.entities.auth.AuthenticatedUser;
 import com.schooldays.service.enrollment.EnrollmentService;
@@ -44,6 +46,26 @@ public class EnrollmentController extends ApiPlaceholderSupport {
             Authentication authentication
     ) {
         return ResponseEntity.ok(enrollmentService.listParentEnrollments(tenantId, this.userId(authentication)));
+    }
+
+    @GetMapping("/api/parents/me/messages")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'PARENT')")
+    public ResponseEntity<MessageListResponse> listParentMessages(
+            @RequestParam("tenantId") UUID tenantId,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(enrollmentService.listParentMessages(tenantId, this.userId(authentication)));
+    }
+
+    @PostMapping("/api/parents/me/messages/{messageId}/read")
+    @PreAuthorize("@tenantSecurity.hasTenantRole(authentication, #tenantId, 'PARENT')")
+    public ResponseEntity<EndpointStatusResponse> markParentMessageRead(
+            @RequestParam("tenantId") UUID tenantId,
+            @PathVariable UUID messageId,
+            Authentication authentication
+    ) {
+        enrollmentService.markParentMessageRead(tenantId, this.userId(authentication), messageId);
+        return ResponseEntity.ok(new EndpointStatusResponse("read", "POST /api/parents/me/messages/{messageId}/read", "Message marked as read."));
     }
 
     @PostMapping("/api/enrollments")
@@ -78,9 +100,11 @@ public class EnrollmentController extends ApiPlaceholderSupport {
     @PreAuthorize("@tenantSecurity.canManageEnrollment(authentication, #tenantId, #enrollmentId)")
     public ResponseEntity<EndpointStatusResponse> rejectEnrollment(
             @PathVariable UUID tenantId,
-            @PathVariable UUID enrollmentId
+            @PathVariable UUID enrollmentId,
+            @Valid @RequestBody RejectEnrollmentRequest request,
+            Authentication authentication
     ) {
-        enrollmentService.rejectEnrollment(tenantId, enrollmentId);
+        enrollmentService.rejectEnrollment(tenantId, enrollmentId, this.userId(authentication), request.message());
         return ResponseEntity.ok(new EndpointStatusResponse("rejected", "POST /api/tenants/{tenantId}/enrollment-requests/{enrollmentId}/reject", "Enrollment request rejected."));
     }
 

@@ -19,6 +19,7 @@ import com.schooldays.dto.classroom.ClassListResponse;
 import com.schooldays.dto.classroom.ClassResponse;
 import com.schooldays.dto.classroom.CreateClassRequest;
 import com.schooldays.dto.classroom.UpdateClassRequest;
+import com.schooldays.dto.site.SiteResponse;
 import com.schooldays.jooq.generated.tables.records.ClassesRecord;
 import com.schooldays.service.cache.SchoolDataCacheService;
 import org.jooq.DSLContext;
@@ -79,9 +80,13 @@ public class ClassService {
     }
 
     private ClassListResponse fetchAvailableClasses(UUID tenantId, OffsetDateTime now) {
-        List<ClassResponse> classes = classDao.findAvailableForRegistration(tenantId, now)
+        List<ClassResponse> classes = classDao.findAvailableForRegistrationWithSite(tenantId, now)
                 .stream()
-                .map(ClassResponse::from)
+                .map(record -> {
+                    ClassesRecord classRecord = record.into(CLASSES);
+                    SiteResponse site = SiteResponse.from(record.into(SCHOOL_SITES));
+                    return ClassResponse.from(classRecord, site.name(), site.displayLocation());
+                })
                 .toList();
         return new ClassListResponse(classes);
     }
