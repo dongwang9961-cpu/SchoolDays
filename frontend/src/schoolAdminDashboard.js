@@ -1050,7 +1050,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         }
         parentEnrollmentTabs.set(
           childId,
-          ["current", "pending", "history"].includes(button.dataset.parentEnrollmentTab)
+          ["current", "history"].includes(button.dataset.parentEnrollmentTab)
             ? button.dataset.parentEnrollmentTab
             : "current"
         );
@@ -4405,8 +4405,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
   function familyChildCard(child) {
     const enrollmentTab = parentEnrollmentTabs.get(child.id) || "current";
-    const currentEnrollments = currentParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
-    const pendingEnrollments = pendingParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
+    const currentEnrollments = currentAndPendingParentEnrollments().filter((enrollment) => enrollment.childId === child.id);
     const historyEnrollments = parentEnrollmentHistory().filter((enrollment) => enrollment.childId === child.id);
     const availableClasses = availableClassesForChild(child.id);
     const details = [
@@ -4430,15 +4429,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
             data-parent-enrollment-child-id="${escapeHtml(child.id)}"
             type="button"
           >
-            Current enrolled classes
-          </button>
-          <button
-            class="secondary-button compact-button ${enrollmentTab === "pending" ? "is-active" : ""}"
-            data-parent-enrollment-tab="pending"
-            data-parent-enrollment-child-id="${escapeHtml(child.id)}"
-            type="button"
-          >
-            Pending requests
+            Current & pending
           </button>
           <button
             class="secondary-button compact-button ${enrollmentTab === "history" ? "is-active" : ""}"
@@ -4451,9 +4442,7 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         </div>
         ${enrollmentTab === "history"
           ? familyClassList("Enrollment history", historyEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No enrollment history.")
-          : enrollmentTab === "pending"
-            ? familyClassList("Pending requests", pendingEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No pending enrollment requests.")
-            : familyClassList("Current enrolled classes", currentEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current enrolled classes.")}
+          : familyClassList("Current & pending enrollments", currentEnrollments.map((enrollment) => enrolledClassSummary(enrollment)), "No current or pending enrollments.")}
         ${familyClassList("Open classes", availableClasses.map((classRecord) => availableClassSummary(classRecord, child.id)), "No additional open classes right now.")}
       </article>
     `;
@@ -4622,6 +4611,14 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     return enrollments.filter((enrollment) =>
       !["cancelled", "rejected"].includes(String(enrollment.status || "").toLowerCase())
     );
+  }
+
+  function currentAndPendingParentEnrollments() {
+    const visibleIds = new Set([
+      ...currentParentEnrollments().map((enrollment) => enrollment.id),
+      ...pendingParentEnrollments().map((enrollment) => enrollment.id),
+    ]);
+    return enrollments.filter((enrollment) => visibleIds.has(enrollment.id));
   }
 
   function currentParentEnrollments() {
