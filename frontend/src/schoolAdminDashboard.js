@@ -273,6 +273,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let loadingNotifications = false;
   let childRows = null;
   let children = [];
+  const childrenCache = new Map();
   let selectedChildId = "";
   let loadingChildren = false;
   let enrollments = [];
@@ -284,6 +285,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let pendingEnrollmentRequests = [];
   let loadingPendingEnrollmentRequests = false;
   let attendanceRecords = [];
+  const parentAttendanceCache = new Map();
   let attendanceGrid = null;
   let selectedAttendanceClassId = "";
   let adminAttendanceView = "table";
@@ -1004,6 +1006,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     });
     root.querySelector("[data-enrollment-refresh]")?.addEventListener("click", () => {
       void refreshParentEnrollments();
+    });
+    root.querySelector("[data-children-refresh]")?.addEventListener("click", () => {
+      void refreshChildren();
     });
     root.querySelectorAll("[data-enrollment-page-tab]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -4059,7 +4064,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         activeOperation = "";
         childRows = null;
         render();
-        await loadChildren();
+        invalidateChildrenCache();
+        await loadChildren({ force: true });
         return;
       }
 
@@ -4075,7 +4081,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
         activeOperation = "";
         childRows = null;
         render();
-        await loadChildren();
+        invalidateChildrenCache();
+        await loadChildren({ force: true });
         return;
       }
 
@@ -4327,8 +4334,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     if (section.id === "notifications") {
       return notificationList(rows);
     }
-    if (section.id === "children" && children.length) {
-      return childProfileGrid();
+    if (section.id === "children" && role === "PARENT") {
+      return childrenPageContent(rows);
     }
     if (section.id === "enrollments" && role === "PARENT") {
       return `
@@ -4457,6 +4464,25 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       <div class="child-profile-grid" role="list" aria-label="Children">
         ${children.map((child) => childProfileCard(child)).join("")}
       </div>
+    `;
+  }
+
+  function childrenPageContent(rows) {
+    return `
+      <div class="children-list-toolbar">
+        <span>Child records are cached until refreshed.</span>
+        <button
+          class="secondary-button compact-button"
+          data-children-refresh
+          type="button"
+          ${loadingChildren ? "disabled" : ""}
+        >
+          ${loadingChildren ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
+      ${children.length
+        ? childProfileGrid()
+        : `<div class="data-list">${rows.map((row) => `<div class="data-row">${escapeHtml(row)}</div>`).join("")}</div>`}
     `;
   }
 
@@ -6203,14 +6229,29 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     await loadClasses();
   }
 
-  async function loadChildren() {
+  async function loadChildren({ force = false } = {}) {
     if (loadingChildren || !school?.tenantId) {
+      return;
+    }
+    const cacheKey = school.tenantId;
+    const cached = childrenCache.get(cacheKey);
+    if (!force && cached) {
+      children = cached.children;
+      childRows = children.length
+        ? children.map((child) => `${child.firstName} ${child.lastName}`)
+        : ["No child records loaded yet."];
+      error = "";
+      render();
       return;
     }
     loadingChildren = true;
     try {
       const response = await listChildren(school.tenantId);
       children = response.children || [];
+      childrenCache.set(cacheKey, {
+        children,
+        loadedAt: Date.now(),
+      });
       if (selectedChildId && !children.some((child) => child.id === selectedChildId)) {
         selectedChildId = "";
       }
@@ -6225,6 +6266,17 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       loadingChildren = false;
       render();
     }
+  }
+
+  function invalidateChildrenCache() {
+    if (school?.tenantId) {
+      childrenCache.delete(school.tenantId);
+    }
+  }
+
+  async function refreshChildren() {
+    invalidateChildrenCache();
+    await loadChildren({ force: true });
   }
 
   async function loadStudents({ force = false } = {}) {
@@ -6323,7 +6375,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
   async function refreshParentEnrollments() {
     invalidateParentEnrollmentCache();
+    invalidateParentAttendanceCache();
     await loadEnrollments({ force: true });
+    await loadAttendance({ force: true });
   }
 
   async function loadPendingEnrollmentRequests() {
@@ -6367,20 +6421,38 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
     }
   }
 
-  async function loadAttendance() {
+  async function loadAttendance({ force = false } = {}) {
     if (loadingAttendance || !school?.tenantId || role !== "PARENT") {
+      return;
+    }
+    const cacheKey = school.tenantId;
+    const cached = parentAttendanceCache.get(cacheKey);
+    if (!force && cached) {
+      attendanceRecords = cached.attendance;
+      error = "";
+      render();
       return;
     }
     loadingAttendance = true;
     try {
       const response = await listParentAttendance(school.tenantId);
       attendanceRecords = response.attendance || [];
+      parentAttendanceCache.set(cacheKey, {
+        attendance: attendanceRecords,
+        loadedAt: Date.now(),
+      });
       error = "";
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : "Attendance could not be loaded.";
     } finally {
       loadingAttendance = false;
       render();
+    }
+  }
+
+  function invalidateParentAttendanceCache() {
+    if (school?.tenantId) {
+      parentAttendanceCache.delete(school.tenantId);
     }
   }
 
@@ -6515,7 +6587,8 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
       showTransientToast(successMessage);
       error = "";
       activeOperation = "";
-      await loadAttendance();
+      invalidateParentAttendanceCache();
+      await loadAttendance({ force: true });
       render();
     } catch (attendanceError) {
       const errorMessage = attendanceError instanceof Error ? attendanceError.message : "Attendance check-in could not be saved.";

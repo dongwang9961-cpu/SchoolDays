@@ -1094,6 +1094,20 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.children-list-toolbar {
+  align-items: center;
+  color: #5f6f86;
+  display: flex;
+  font-size: 0.88rem;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.children-list-toolbar .secondary-button {
+  flex: 0 0 auto;
+}
+
 .child-profile-card {
   background: #ffffff;
   border: 1px solid #d8deeb;
