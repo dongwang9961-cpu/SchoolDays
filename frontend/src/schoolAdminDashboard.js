@@ -282,6 +282,7 @@ export function renderSchoolDashboard({ role, school, user, onLogout }) {
   let parentEnrollmentTabs = new Map();
   const parentEnrollmentCache = new Map();
   let loadingEnrollments = false;
+  let refreshingParentData = false;
   let pendingEnrollmentRequests = [];
   let loadingPendingEnrollmentRequests = false;
   let attendanceRecords = [];
@@ -4886,9 +4887,9 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
           class="secondary-button compact-button"
           data-enrollment-refresh
           type="button"
-          ${loadingEnrollments ? "disabled" : ""}
+          ${loadingEnrollments || refreshingParentData ? "disabled" : ""}
         >
-          ${loadingEnrollments ? "Refreshing..." : "Refresh"}
+          ${loadingEnrollments || refreshingParentData ? "Refreshing..." : "Refresh"}
         </button>
       </div>
       ${selectedEnrollmentCalendar()}
@@ -6273,7 +6274,15 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
 
   async function refreshChildren() {
     invalidateChildrenCache();
+    notice = "Refreshing children...";
+    error = "";
+    render();
     await loadChildren({ force: true });
+    if (!error) {
+      notice = "Children refreshed successfully.";
+      showTransientToast(notice);
+      render();
+    }
   }
 
   async function loadStudents({ force = false } = {}) {
@@ -6371,10 +6380,29 @@ const CHECK_IN_PERIODIC_REFRESH_MS = 30000;
   }
 
   async function refreshParentEnrollments() {
+    if (refreshingParentData) {
+      return;
+    }
+    refreshingParentData = true;
     invalidateParentEnrollmentCache();
     invalidateParentAttendanceCache();
+    notice = "Refreshing enrollments and attendance...";
+    error = "";
+    render();
     await loadEnrollments({ force: true });
+    const enrollmentRefreshError = error;
     await loadAttendance({ force: true });
+    const attendanceRefreshError = error;
+    refreshingParentData = false;
+    if (!enrollmentRefreshError && !attendanceRefreshError) {
+      notice = "Enrollments and attendance refreshed successfully.";
+      showTransientToast(notice);
+      render();
+    } else {
+      notice = "";
+      error = enrollmentRefreshError || attendanceRefreshError;
+      render();
+    }
   }
 
   async function loadPendingEnrollmentRequests() {
