@@ -73,7 +73,7 @@ public class ChildService {
         record.setLastName(request.lastName());
         record.setDateOfBirth(request.dateOfBirth());
         record.setMetadata(JSONB.valueOf(metadataJson(request)));
-        ChildrenRecord saved = childDao.save(record, OffsetDateTime.now());
+        ChildrenRecord saved = childDao.update(record, OffsetDateTime.now());
         cacheService.clearAttendanceCaches(record.getTenantId());
         return ChildResponse.fromRecord(saved);
     }

@@ -14,6 +14,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import com.schooldays.dao.student.StudentRosterDao;
+import com.schooldays.dto.student.StudentRosterRowResponse;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import org.flywaydb.core.Flyway;
 import org.jooq.DSLContext;
@@ -145,6 +146,16 @@ class StudentRosterServiceTests {
                     assertThat(student.enrollmentId()).isNotNull();
                     assertThat(student.className()).isEqualTo("Morning Art");
                 });
+    }
+
+    @Test
+    void detailedRosterKeepsEveryClassEnrollmentForClientFiltering() {
+        var response = studentRosterService.listClassStudents(tenantId, null, null, "active", null, true);
+
+        assertThat(response.students())
+                .hasSize(2)
+                .extracting(StudentRosterRowResponse::classId)
+                .containsExactly(artClassId, musicClassId);
     }
 
     private void insertClass(UUID classId, UUID programId, String name) {
